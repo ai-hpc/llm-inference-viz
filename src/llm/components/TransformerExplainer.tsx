@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import { useProgramState } from '../Sidebar';
 import { TRANSFORMER_STAGES, boundLabel, Regime } from './TransformerStages';
 import { RooflineChart } from './RooflineChart';
+import { TensorParallelPanel } from './TensorParallelPanel';
 
 // Left-hand 2D explanation of the dense decoder-only transformer forward pass.
 // Hovering a stage highlights the matching blocks in the 3D model on the right
@@ -43,7 +44,8 @@ export const TransformerExplainer: React.FC = () => {
         progState.markDirty();
     }
 
-    let modelName = progState.modelSet[progState.currentModelIdx]?.name ?? 'this model';
+    let currentPreset = progState.modelSet[progState.currentModelIdx];
+    let modelName = currentPreset?.name ?? 'this model';
     let hoveredStage = TRANSFORMER_STAGES.find(s => s.key === hovered) ?? null;
     let markAi = hoveredStage ? hoveredStage[regime].ai : undefined;
     let markLabel = hoveredStage ? hoveredStage.title.split('·')[0].trim() : regime;
@@ -77,6 +79,11 @@ export const TransformerExplainer: React.FC = () => {
                     : 'Prefill (many tokens at once) sits right: the big matmuls reuse weights across tokens → compute-bound, limited by peak FLOPs.'}
             </p>
         </div>
+
+        {/* tensor parallelism */}
+        {currentPreset && <div className="mt-2">
+            <TensorParallelPanel shape={currentPreset.shape} />
+        </div>}
 
         {/* stages */}
         <div className="mt-3 flex flex-col gap-1.5">

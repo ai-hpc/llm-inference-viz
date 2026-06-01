@@ -74,6 +74,17 @@ drops its marker onto the roofline. The teaching point falls straight out: at **
 almost every stage is memory-bound (stream all weights for one token), while at **prefill**
 the matmuls become compute-bound. Intensity numbers are illustrative, not measured.
 
+### Tensor parallelism (TP = 1 / 2 / 4 / 8)
+
+A **TP selector** (`components/TensorParallelPanel.tsx`) shows how the current model shards
+across GPUs: a sharding diagram (N GPU boxes + the all-reduce bus, 2 per layer), and
+per-GPU stats computed from the model shape — total params, params/GPU, weights/GPU (GB,
+FP16), Q heads/GPU, KV heads/GPU (flagging GQA replication when TP > KV heads), and MLP
+width/GPU. The takeaway ties back to the roofline: each GPU holds 1/N of the weights and
+reads its shard in parallel, so memory-bound decode goes up to ~N× faster — minus the
+all-reduce overhead that grows with TP. Param counts are estimated from the config
+(≈7.6B / 70.5B / 72.6B for the three models) and match the real models.
+
 > Note on framing: each model has a hand-set camera. They were tuned without a GPU to
 > view them, so the 7B framing in particular may need a scroll/drag to sit perfectly —
 > easy to adjust in the `modelSet` cameras in `Program.ts`.
