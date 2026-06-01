@@ -2,6 +2,7 @@ import React from 'react';
 import clsx from 'clsx';
 import { IModelShape } from '../GptModel';
 import { SHARD_HEX } from './shardColors';
+import { Admonition } from './Admonition';
 
 // Data sourced from:
 //  "Achieving Peak Inference Performance for Qwen 2.5 72B on an 8-GPU H200 Cluster" (2025)
@@ -98,7 +99,7 @@ export const TensorParallelPanel: React.FC<{
             </span>
         </div>;
 
-    return <div className="rounded-md border border-slate-200 bg-white p-2">
+    return <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
         <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-700">Tensor parallelism</span>
             <div className="flex gap-1">
@@ -118,10 +119,11 @@ export const TensorParallelPanel: React.FC<{
         </div>
 
         {/* FP8 alignment warning */}
-        {fp8AlignWarn && <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] leading-snug text-amber-800">
-            <span className="font-semibold">⚠ FP8 + TP=8:</span> Qwen 2.5 uses block-wise FP8 quantization.
-            The block size must divide each shard's output dimension — TP=8 often violates this for Qwen layers,
-            causing a runtime error. Fix: reduce to TP=4 or TP=2 when using FP8.
+        {fp8AlignWarn && <div className="mt-2">
+            <Admonition kind="warning" title="FP8 + TP=8">
+                Block-wise FP8 needs the block size to divide each shard's output dimension — TP=8 often
+                violates this for these layers, causing a load error. Fix: drop to TP=4 or TP=2 when using FP8.
+            </Admonition>
         </div>}
 
         {/* Per-GPU stats */}
@@ -142,12 +144,13 @@ export const TensorParallelPanel: React.FC<{
         </div>
 
         {/* Disaggregated P/D callout */}
-        <div className="mt-1.5 rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] leading-snug text-indigo-800">
-            <span className="font-semibold">Disaggregated P/D (8-GPU H200):</span> 4 GPUs prefill (TP=1)
-            + 4 GPUs decode (TP=2) → <span className="font-semibold text-indigo-900">648 tok/s</span> vs
-            aggregated TP=8 → <span className="font-semibold">321 tok/s</span> (+101%).
-            Prefill is compute-bound (wants dense GEMM); decode is memory-bound (wants bandwidth).
-            Separating them lets each workload run on its optimal configuration.
+        <div className="mt-2">
+            <Admonition kind="note" title="Disaggregated P/D · 8× H200">
+                4 GPUs prefill (TP=1) + 4 GPUs decode (TP=2) → <span className="font-semibold">648 tok/s</span> vs
+                aggregated TP=8 → <span className="font-semibold">321 tok/s</span> (+101%). Prefill is compute-bound
+                (wants dense GEMM); decode is memory-bound (wants bandwidth) — separating them lets each run on its
+                optimal config.
+            </Admonition>
         </div>
 
         <p className="mt-1.5 text-[10px] leading-snug text-slate-500">
