@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import clsx from 'clsx';
 import { useProgramState } from '../Sidebar';
-import { TRANSFORMER_STAGES, boundLabel, Regime } from './TransformerStages';
+import { TRANSFORMER_STAGES, Regime, Bound, effectivePoint, effectiveBound, fmtAi } from './TransformerStages';
 import { RooflineChart } from './RooflineChart';
 import { TensorParallelPanel } from './TensorParallelPanel';
 
@@ -9,21 +9,21 @@ import { TensorParallelPanel } from './TensorParallelPanel';
 // Hovering a stage highlights the matching blocks in the 3D model on the right
 // (via state.display.hoveredStage, consumed by applyStageHighlight in Program.ts),
 // expands the detailed description, and shows where the stage sits on the roofline.
-// A Prefill/Decode toggle drives the compute-vs-memory readouts.
+// A Prefill/Decode toggle and the TP selector drive the compute-vs-memory readouts.
 
 function IntensityBar({ c }: { c: number }) {
     let pct = Math.round(c * 100);
-    return <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-slate-200" title={`${pct}% compute · ${100 - pct}% memory`}>
+    return <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-slate-200" title={`${pct}% compute · ${100 - pct}% memory/comm`}>
         <div style={{ width: `${pct}%` }} className="bg-orange-400" />
         <div style={{ width: `${100 - pct}%` }} className="bg-blue-400" />
     </div>;
 }
 
-function BoundBadge({ c }: { c: number }) {
-    let label = boundLabel(c);
+function BoundBadge({ label }: { label: Bound }) {
     let color = label === 'Compute-bound' ? 'bg-orange-100 text-orange-700'
         : label === 'Memory-bound' ? 'bg-blue-100 text-blue-700'
-            : 'bg-slate-200 text-slate-700';
+            : label === 'Comm-bound' ? 'bg-purple-100 text-purple-700'
+                : 'bg-slate-200 text-slate-700';
     return <span className={clsx('rounded px-1.5 py-0.5 text-[10px] font-semibold', color)}>{label}</span>;
 }
 
@@ -31,6 +31,13 @@ export const TransformerExplainer: React.FC = () => {
     let progState = useProgramState();
     let [hovered, setHovered] = useState<string | null>(null);
     let [regime, setRegime] = useState<Regime>('decode');
+    let [tp, setTpState] = useState(1);
+
+    function setTp(n: number) {
+        setTpState(n);
+        progState.display.tp = n; // drives the 3D weight sharding (applyTensorParallelShards)
+        progState.markDirty();
+    }
 
     function enter(key: string) {
         setHovered(key);
@@ -47,7 +54,7 @@ export const TransformerExplainer: React.FC = () => {
     let currentPreset = progState.modelSet[progState.currentModelIdx];
     let modelName = currentPreset?.name ?? 'this model';
     let hoveredStage = TRANSFORMER_STAGES.find(s => s.key === hovered) ?? null;
-    let markAi = hoveredStage ? hoveredStage[regime].ai : undefined;
+    let markAi = hoveredStage ? effectivePoint(hoveredStage, regime, tp).ai : undefined;
     let markLabel = hoveredStage ? hoveredStage.title.split('·')[0].trim() : regime;
 
     return <div className="h-full overflow-y-auto bg-slate-50 px-4 py-4 text-slate-800">
@@ -82,14 +89,22 @@ export const TransformerExplainer: React.FC = () => {
 
         {/* tensor parallelism */}
         {currentPreset && <div className="mt-2">
-            <TensorParallelPanel shape={currentPreset.shape} />
+            <TensorParallelPanel shape={currentPreset.shape} tp={tp} onTpChange={setTp} />
         </div>}
+
+        {tp > 1 && <p className="mt-2 text-[10px] leading-snug text-slate-500">
+            <span className="font-semibold text-slate-600">TP={tp} & the roofline:</span> per GPU, TP divides
+            both FLOPs and weight bytes, so most stages keep the same arithmetic intensity. The exception is the
+            two <span className="text-purple-700 font-semibold">all-reduce</span> stages (6 &amp; 7): their per-GPU
+            compute shrinks but communication doesn’t, so they slide toward <span className="text-purple-700 font-semibold">comm-bound</span> as TP grows.
+        </p>}
 
         {/* stages */}
         <div className="mt-3 flex flex-col gap-1.5">
             {TRANSFORMER_STAGES.map(stage => {
                 let active = hovered === stage.key;
-                let pt = stage[regime];
+                let pt = effectivePoint(stage, regime, tp);
+                let bound = effectiveBound(stage, regime, tp);
                 return <div
                     key={stage.key}
                     onMouseEnter={() => enter(stage.key)}
@@ -101,18 +116,21 @@ export const TransformerExplainer: React.FC = () => {
                 >
                     <div className="flex items-center justify-between gap-2">
                         <div className="text-sm font-semibold">{stage.title}</div>
-                        <BoundBadge c={pt.compute} />
+                        <BoundBadge label={bound} />
                     </div>
                     <div className="text-xs text-slate-500">{stage.summary}</div>
                     <div className="mt-1.5 flex items-center gap-2">
                         <IntensityBar c={pt.compute} />
-                        <span className="whitespace-nowrap text-[10px] text-slate-400">~{pt.ai} FLOP/B</span>
+                        <span className="whitespace-nowrap text-[10px] text-slate-400">~{fmtAi(pt.ai)} FLOP/B</span>
                     </div>
                     {active && <>
                         <div className="mt-2 text-xs leading-relaxed text-slate-700">{stage.detail}</div>
                         <div className="mt-1.5 text-[11px] leading-snug text-slate-500">
                             <span className="font-semibold capitalize text-slate-600">{regime}:</span> {stage.why}
                         </div>
+                        {pt.comm && <div className="mt-1 text-[11px] leading-snug text-purple-600">
+                            TP={tp}: 1 all-reduce here per layer. Per-GPU compute ÷{tp}, but the collective doesn’t shrink → effective AI ~{fmtAi(pt.ai)} FLOP/B.
+                        </div>}
                     </>}
                 </div>;
             })}
@@ -121,7 +139,7 @@ export const TransformerExplainer: React.FC = () => {
         {/* legend */}
         <div className="mt-3 flex items-center gap-3 text-[10px] text-slate-500">
             <span className="flex items-center gap-1"><span className="inline-block h-2 w-3 rounded-sm bg-orange-400" /> compute</span>
-            <span className="flex items-center gap-1"><span className="inline-block h-2 w-3 rounded-sm bg-blue-400" /> memory</span>
+            <span className="flex items-center gap-1"><span className="inline-block h-2 w-3 rounded-sm bg-blue-400" /> memory / comm</span>
         </div>
 
         <p className="mt-3 text-[10px] leading-relaxed text-slate-400">

@@ -92,6 +92,13 @@ the colours of the GPU boxes in the panel. This is driven by `state.display.tp` 
 to break each weight block into N sub-blocks and a per-cube `shardColor` override in
 `blockRender.ts`. Shared palette in `components/shardColors.ts`.
 
+The per-stage **roofline readouts also react to TP**. TP divides both FLOPs and weight
+bytes per GPU, so per-GPU arithmetic intensity is ~unchanged for most stages — the honest
+exception is the two **row-parallel all-reduce stages** (attention output, MLP down): their
+per-GPU compute shrinks but the collective doesn’t, so their effective AI falls and they
+turn **comm-bound** (purple badge) as TP grows. Modeled by `effectivePoint` /
+`effectiveBound` in `TransformerStages.ts`.
+
 > Note on framing: each model has a hand-set camera. They were tuned without a GPU to
 > view them, so the 7B framing in particular may need a scroll/drag to sit perfectly —
 > easy to adjust in the `modelSet` cameras in `Program.ts`.

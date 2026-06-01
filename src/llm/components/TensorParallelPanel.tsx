@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import clsx from 'clsx';
 import { IModelShape } from '../GptModel';
-import { useProgramState } from '../Sidebar';
 import { SHARD_HEX } from './shardColors';
 
 // Tensor-parallelism (TP) explorer. TP shards each weight matrix across N GPUs:
@@ -65,16 +64,7 @@ function ShardDiagram({ tp }: { tp: number }) {
     </svg>;
 }
 
-export const TensorParallelPanel: React.FC<{ shape: IModelShape }> = ({ shape }) => {
-    let progState = useProgramState();
-    let [tp, setTpState] = useState(1);
-
-    function setTp(n: number) {
-        setTpState(n);
-        progState.display.tp = n;   // drives the 3D weight sharding (applyTensorParallelShards)
-        progState.markDirty();
-    }
-
+export const TensorParallelPanel: React.FC<{ shape: IModelShape; tp: number; onTpChange: (n: number) => void }> = ({ shape, tp, onTpChange }) => {
     let params = estimateParams(shape);
     let nKVHeads = shape.nKVHeads ?? shape.nHeads;
     let bytesFp16 = 2 * params;                 // weights only
@@ -98,7 +88,7 @@ export const TensorParallelPanel: React.FC<{ shape: IModelShape }> = ({ shape })
                 {TP_OPTIONS.map(n => (
                     <button
                         key={n}
-                        onClick={() => setTp(n)}
+                        onClick={() => onTpChange(n)}
                         className={clsx('rounded px-2 py-0.5 text-xs font-semibold',
                             tp === n ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-indigo-100')}
                     >TP={n}</button>

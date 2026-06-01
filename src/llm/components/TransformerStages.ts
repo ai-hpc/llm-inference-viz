@@ -23,12 +23,39 @@ export interface ITransformerStage {
     prefill: IRooflinePoint;
     decode: IRooflinePoint;
     why: string;                     // one line: why this is compute- or memory-bound
+    comm?: boolean;                  // has an all-reduce under tensor parallelism (row-parallel sub-layer)
 }
 
-export function boundLabel(c: number): 'Compute-bound' | 'Memory-bound' | 'Mixed' {
+export type Bound = 'Compute-bound' | 'Memory-bound' | 'Mixed' | 'Comm-bound';
+
+export function boundLabel(c: number): Bound {
     if (c >= 0.66) return 'Compute-bound';
     if (c <= 0.34) return 'Memory-bound';
     return 'Mixed';
+}
+
+// Per-GPU roofline point adjusted for tensor parallelism. TP divides BOTH the FLOPs and the
+// weight bytes per GPU, so per-GPU arithmetic intensity is ~unchanged for the matmuls.
+// The exception is the two row-parallel stages (attention output, MLP down): each ends in an
+// all-reduce whose cost grows with TP while per-GPU compute shrinks — so their effective AI
+// falls and they become communication-bound at high TP.
+export function effectivePoint(stage: ITransformerStage, regime: Regime, tp: number): { compute: number; ai: number; comm: boolean } {
+    let base = stage[regime];
+    if (stage.comm && tp > 1) {
+        let commFactor = 1 + 0.6 * (tp - 1); // illustrative all-reduce growth with TP
+        return { compute: base.compute / commFactor, ai: base.ai / commFactor, comm: true };
+    }
+    return { compute: base.compute, ai: base.ai, comm: false };
+}
+
+export function effectiveBound(stage: ITransformerStage, regime: Regime, tp: number): Bound {
+    let p = effectivePoint(stage, regime, tp);
+    if (p.comm) return 'Comm-bound';
+    return boundLabel(p.compute);
+}
+
+export function fmtAi(ai: number): string {
+    return ai >= 10 ? Math.round(ai).toString() : ai.toFixed(ai < 1 ? 2 : 1);
 }
 
 export const TRANSFORMER_STAGES: ITransformerStage[] = [
@@ -107,7 +134,9 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
         match: ['V Output', 'Attention Output', 'Projection Weights', 'Projection Bias', 'Attention Residual'],
         prefill: { compute: 0.9, ai: 120 },
         decode: { compute: 0.15, ai: 2 },
-        why: 'Another projection GEMM/GEMV — compute-bound batched (prefill), memory-bound at batch=1 (decode).',
+        why: 'Another projection GEMM/GEMV — compute-bound batched (prefill), memory-bound at batch=1 (decode). ' +
+            'Row-parallel under TP, so it ends in an all-reduce.',
+        comm: true,
     },
     {
         key: 'mlp',
@@ -121,7 +150,9 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
         prefill: { compute: 0.95, ai: 200 },
         decode: { compute: 0.12, ai: 2 },
         why: 'The biggest matmuls and most of the weights. Prefill: the dominant FLOPs ' +
-            '(compute-bound). Decode: the dominant weight bytes streamed from HBM (memory-bound).',
+            '(compute-bound). Decode: the dominant weight bytes streamed from HBM (memory-bound). ' +
+            'The down projection is row-parallel, so it ends in an all-reduce.',
+        comm: true,
     },
     {
         key: 'layers',
