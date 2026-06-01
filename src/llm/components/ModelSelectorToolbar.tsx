@@ -2,48 +2,51 @@ import React from 'react';
 import { useProgramState } from '../Sidebar';
 import clsx from 'clsx';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faExpand, faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
-import { Vec3 } from '@/src/utils/vector';
-import { Mat4f } from '@/src/utils/matrix';
+import { faExpand } from '@fortawesome/free-solid-svg-icons';
 
 export const ModelSelectorToolbar: React.FC<{
 }> = () => {
     let progState = useProgramState();
 
-    function onExpandClick() {
-        let example = progState.examples[progState.currExampleId] ?? progState.mainExample;
-        progState.camera.desiredCamera = example.camera;
+    // Switch the displayed model: swap the shape (the render loop regenerates the layout
+    // from state.shape) and fly the camera to that model's framing.
+    function selectModel(idx: number) {
+        let preset = progState.modelSet[idx];
+        if (!preset) {
+            return;
+        }
+        progState.currentModelIdx = idx;
+        progState.shape = preset.shape;
+        progState.mainExample.name = preset.name;
+        progState.mainExample.shape = preset.shape;
+        progState.mainExample.camera = preset.camera;
+        progState.camera.desiredCamera = preset.camera;
         progState.markDirty();
     }
 
-    function onMagnifyClick() {
-        let example = progState.examples[progState.currExampleId] ?? progState.mainExample;
-        let layout = example.layout ?? progState.layout;
-
-        // new Vec3(3.347, 48.000, -2.634), new Vec3(270.000, 4.500, 1.199)
-
-        // new Vec3(-1.771, 0.750, -4.470), new Vec3(270.000, 4.500, 0.739)
-
-        let obj = layout.residual0;
-        let modelTarget = new Vec3(obj.x, obj.y, obj.z);
-        let modelMtx = progState.camera.modelMtx.mul(Mat4f.fromTranslation(example.offset))
-
-        let center = modelMtx.mulVec3Proj(modelTarget);
-        let zoom = progState.currExampleId === -1 ? 0.7 : 4;
-        progState.camera.desiredCamera = {
-            center, angle: new Vec3(270, 4.5, zoom),
-        };
+    // Reset the camera to the current model's default framing.
+    function onExpandClick() {
+        let preset = progState.modelSet[progState.currentModelIdx];
+        progState.camera.desiredCamera = preset.camera;
         progState.markDirty();
-
     }
 
     return <div className='absolute top-0 left-0 flex flex-col'>
+        <div className='mt-2 ml-2 flex flex-row flex-wrap items-center'>
+            {progState.modelSet.map((preset, idx) => {
+                let isActive = progState.currentModelIdx === idx;
+                return <div
+                    key={preset.name}
+                    className={clsx('m-2 p-2 rounded shadow cursor-pointer hover:bg-blue-300', isActive ? 'bg-blue-200 font-bold' : 'bg-white')}
+                    onClick={() => selectModel(idx)}
+                >
+                    {preset.name}
+                </div>;
+            })}
+        </div>
         <div className='ml-2 flex flex-row'>
-            <div className={clsx('m-2 p-2 bg-white min-w-[2rem] flex justify-center rounded shadow cursor-pointer hover:bg-blue-300')} onClick={onExpandClick}>
+            <div className={clsx('m-2 p-2 bg-white min-w-[2rem] flex justify-center rounded shadow cursor-pointer hover:bg-blue-300')} onClick={onExpandClick} title="Reset camera">
                 <FontAwesomeIcon icon={faExpand} />
-            </div>
-            <div className={clsx('m-2 p-2 bg-white min-w-[2rem] flex justify-center rounded shadow cursor-pointer hover:bg-blue-300')} onClick={onMagnifyClick}>
-                <FontAwesomeIcon icon={faMagnifyingGlass} />
             </div>
         </div>
     </div>;

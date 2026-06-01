@@ -32,22 +32,30 @@ build-time `fetch`. Those routes were removed and `/` now redirects to `/llm`.
 See [`CUSTOMIZATIONS.md`](CUSTOMIZATIONS.md) for the full change rationale and the
 remaining work.
 
-## Single model: Qwen 2.5 72B
+## Three switchable models
 
-This build renders **only Qwen 2.5 72B** — true-scale structural view: 80 layers, hidden
-8192, 64 Q / 8 KV heads, head-dim 128, SwiGLU ffn 29568, vocab 152064. Like upstream's
-GPT-3 view, this renders *structure at scale*, not every weight cell (72B cells cannot be
-drawn in a browser).
+Top-left buttons switch between three structural views (default **Qwen 2.5 7B**):
 
-The GPT-2/GPT-3 presets, the down-scaled "Qwen (nano)" twin, the model-selector buttons,
-and the nano-gpt guided **walkthrough sidebar** ("chapter overview") were all removed so
-the view is focused on the one model. Two camera controls remain top-left:
-**expand** (reset framing) and **magnify** (auto-frame the model) — plus mouse drag /
-scroll and WASD-or-arrow keys to navigate.
+| Model | hidden | layers | heads (Q/KV) | SwiGLU ffn | vocab |
+|-------|--------|--------|--------------|------------|-------|
+| **Qwen 2.5 7B** (default) | 3584 | 28 | 28 / 4 | 18944 | 152064 |
+| **Qwen 2.5 72B** | 8192 | 80 | 64 / 8 | 29568 | 152064 |
+| **Llama 3.3 70B** | 8192 | 80 | 64 / 8 | 28672 | 128256 |
 
-> Note: the down-scaled Qwen twin and the modern-arch operator code still live in the
-> source (gated on `arch === 'qwen'`); only the *presets/UI* were removed. Re-add an
-> example entry in `Program.ts` to bring a detailed per-cell Qwen view back.
+All three share the modern-arch operator set (GQA + RoPE + RMSNorm + SwiGLU), so the same
+`arch: 'qwen'` geometry drives all of them; the model-set lives in `Program.ts`
+(`initProgramState`). Like upstream's GPT-3 view these render *structure at scale*, not
+every weight cell (70B+ cells can't be drawn in a browser), so per-cube text labels are
+suppressed for models with > 12 blocks — the **model card** carries the per-model summary
+(`GQA …Q/…KV · SwiGLU · RMSNorm · RoPE` + param count).
+
+The GPT-2/GPT-3 presets and the nano-gpt guided **walkthrough sidebar** ("chapter
+overview") were removed. The **expand** button (top-left) resets the camera to the current
+model's framing; mouse drag / scroll and WASD-or-arrow keys navigate.
+
+> Note on framing: each model has a hand-set camera. They were tuned without a GPU to
+> view them, so the 7B framing in particular may need a scroll/drag to sit perfectly —
+> easy to adjust in the `modelSet` cameras in `Program.ts`.
 
 ## Run locally
 

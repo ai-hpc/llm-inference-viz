@@ -38,6 +38,8 @@ export interface IProgramState {
     mainExample: IModelExample;
     examples: IModelExample[];
     currExampleId: number;
+    modelSet: IModelPreset[];   // switchable models (Qwen 7B / Qwen 72B / Llama 70B)
+    currentModelIdx: number;    // index into modelSet of the currently displayed model
     shape: IModelShape;
     gptGpuModel: IGpuGptModel | null;
     jsGptModel: IGptModelLink | null;
@@ -45,6 +47,12 @@ export interface IProgramState {
     display: IDisplayState;
     pageLayout: ILayout;
     markDirty: () => void;
+}
+
+export interface IModelPreset {
+    name: string;
+    shape: IModelShape;
+    camera: ICameraPos;
 }
 
 export interface IModelExample {
@@ -86,11 +94,49 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
     let walkthrough = initWalkthrough();
 
     let prevState = SavedState.state;
-    // Framed for the Qwen 2.5 72B structural model at the origin. (Equivalent to the
-    // known-good example framing at offset (900000,0,0), translated back to origin.)
+
+    function makeCamera(center: Vec3, angle: Vec3): ICameraPos {
+        return { center, angle };
+    }
+
+    // ---- Switchable models. All three share the modern-arch operator set
+    // (RMSNorm + RoPE + GQA + SwiGLU), so arch: 'qwen' drives the geometry for all. ----
+
+    // Qwen 2.5 7B Instruct (DEFAULT). hidden 3584, 28 Q / 4 KV heads, head dim 128,
+    // 28 layers, SwiGLU ffn 18944, vocab 152064.
+    let qwen7bShape: IModelShape = {
+        B: 1, T: 1024, C: 3584, nHeads: 28, nKVHeads: 4, A: 128,
+        nBlocks: 28, ffnDim: 18944, vocabSize: 152064,
+        arch: 'qwen', normEps: 1e-6, ropeTheta: 1000000,
+    };
+
+    // Qwen 2.5 72B Instruct. hidden 8192, 64 Q / 8 KV heads, head dim 128,
+    // 80 layers, SwiGLU ffn 29568, vocab 152064.
+    let qwen72bShape: IModelShape = {
+        B: 1, T: 1024, C: 8192, nHeads: 64, nKVHeads: 8, A: 128,
+        nBlocks: 80, ffnDim: 29568, vocabSize: 152064,
+        arch: 'qwen', normEps: 1e-6, ropeTheta: 1000000,
+    };
+
+    // Llama 3.3 70B Instruct. hidden 8192, 64 Q / 8 KV heads, head dim 128,
+    // 80 layers, SwiGLU ffn 28672, vocab 128256. (No QKV bias, unlike Qwen 2.5.)
+    let llama70bShape: IModelShape = {
+        B: 1, T: 1024, C: 8192, nHeads: 64, nKVHeads: 8, A: 128,
+        nBlocks: 80, ffnDim: 28672, vocabSize: 128256,
+        arch: 'qwen', normEps: 1e-5, ropeTheta: 500000,
+    };
+
+    let modelSet: IModelPreset[] = [
+        { name: 'Qwen 2.5 7B',   shape: qwen7bShape,   camera: makeCamera(new Vec3(-21000, 0, -150000), new Vec3(238.959, 10.501, 5200)) },
+        { name: 'Qwen 2.5 72B',  shape: qwen72bShape,  camera: makeCamera(new Vec3(-62322.0, 0, -485242.286), new Vec3(238.959, 10.501, 12583.939)) },
+        { name: 'Llama 3.3 70B', shape: llama70bShape, camera: makeCamera(new Vec3(-62322.0, 0, -485242.286), new Vec3(238.959, 10.501, 12583.939)) },
+    ];
+    let currentModelIdx = 0; // default: Qwen 2.5 7B
+
+    // Live camera starts framed on the default model (Qwen 2.5 7B).
     let camera: ICamera = {
-        angle: new Vec3(238.959, 10.501, 12583.939),
-        center: new Vec3(-62322.0, 0, -485242.286),
+        angle: new Vec3(238.959, 10.501, 5200),
+        center: new Vec3(-21000, 0, -150000),
         transition: {},
         modelMtx: new Mat4f(),
         viewMtx: new Mat4f(),
@@ -99,46 +145,26 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
         camPosModel: new Vec3(),
     }
 
-    // Qwen 2.5 72B Instruct — the only model in this build.
-    // Real config: hidden 8192, 64 query heads / 8 KV heads (GQA 8:1), head dim 128,
-    // 80 layers, SwiGLU FFN inner dim 29568, vocab 152064, 128K (131072) context.
-    let qwen72bShape: IModelShape = {
-        B: 1,
-        T: 1024,          // visual token window; real model trains to 131072
-        C: 8192,
-        nHeads: 64,
-        nKVHeads: 8,
-        A: 128,           // head dim (8192 / 64)
-        nBlocks: 80,
-        ffnDim: 29568,
-        vocabSize: 152064,
-        arch: 'qwen',
-        normEps: 1e-6,
-        ropeTheta: 1000000,
-    };
-
-    function makeCamera(center: Vec3, angle: Vec3): ICameraPos {
-        return { center, angle };
-    }
-
     return {
         native: null,
         wasmGptModel: null,
         render: render!,
-        inWalkthrough: false, // Qwen-only structural view; the nano-gpt guided walkthrough is disabled
+        inWalkthrough: false, // structural views only; the nano-gpt guided walkthrough is disabled
         walkthrough,
         camera,
-        shape: qwen72bShape,
-        layout: genGptModelLayout(qwen72bShape),
+        shape: modelSet[currentModelIdx].shape,
+        layout: genGptModelLayout(modelSet[currentModelIdx].shape),
         currExampleId: -1,
+        modelSet,
+        currentModelIdx,
         mainExample: {
-            name: 'Qwen 2.5 72B',
+            name: modelSet[currentModelIdx].name,
             enabled: true,
-            shape: qwen72bShape,
+            shape: modelSet[currentModelIdx].shape,
             offset: new Vec3(),
             modelCardOffset: new Vec3(),
             blockRender: null!,
-            camera: makeCamera(new Vec3(-62322.0, 0, -485242.286), new Vec3(238.959, 10.501, 12583.939)),
+            camera: modelSet[currentModelIdx].camera,
         },
         examples: [],
         gptGpuModel: null,
@@ -229,7 +255,7 @@ export function runProgram(view: IRenderView, state: IProgramState) {
     // these will get modified by the walkthrough (stored where?)
     drawAllArrows(state.render, state.layout);
 
-    drawModelCard(state, state.layout, 'nano-gpt', new Vec3());
+    drawModelCard(state, state.layout, state.modelSet[state.currentModelIdx].name, new Vec3());
     // drawTokens(state.render, state.layout, state.display);
 
     for (let example of state.examples) {
