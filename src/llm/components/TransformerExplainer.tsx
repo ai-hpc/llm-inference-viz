@@ -54,7 +54,9 @@ export const TransformerExplainer: React.FC = () => {
     let currentPreset = progState.modelSet[progState.currentModelIdx];
     let modelName = currentPreset?.name ?? 'this model';
     let hoveredStage = TRANSFORMER_STAGES.find(s => s.key === hovered) ?? null;
-    let markAi = hoveredStage ? effectivePoint(hoveredStage, regime, tp).ai : undefined;
+    let hoveredPt = hoveredStage ? effectivePoint(hoveredStage, regime, tp) : null;
+    let markAi    = hoveredPt?.ai;
+    let markComm  = hoveredPt?.comm ?? false;
     let markLabel = hoveredStage ? hoveredStage.title.split('·')[0].trim() : regime;
 
     return <div className="h-full overflow-y-auto bg-slate-50 px-4 py-4 text-slate-800">
@@ -79,7 +81,7 @@ export const TransformerExplainer: React.FC = () => {
 
         {/* roofline visualization */}
         <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
-            <RooflineChart regime={regime} ai={markAi} label={markLabel} />
+            <RooflineChart regime={regime} ai={markAi} label={markLabel} comm={markComm} />
             <p className="mt-1 text-[10px] leading-snug text-slate-500">
                 {regime === 'decode'
                     ? 'Decode (1 token/pass) sits far left: it streams every weight from memory for a few FLOPs → memory-bound. Tokens/sec ≈ memory bandwidth ÷ model bytes.'

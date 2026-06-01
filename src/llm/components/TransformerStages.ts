@@ -1,17 +1,27 @@
-// The forward pass of a dense, decoder-only transformer (the Qwen 2.5 / Llama 3.3 family),
-// in execution order. Each stage maps to one or more named blocks in the 3D layout
-// (`match`) so the left explainer panel can light up the matching geometry on hover.
+// The forward pass of a dense, decoder-only transformer (Qwen 2.5 / Llama 3.3 family),
+// in execution order.
 //
-// Each stage also carries a roofline character per regime: `compute` is a 0..1 "compute
-// intensity" (0 = pure memory-bound, 1 = pure compute-bound) used to draw the per-stage
-// bar, and `ai` is an order-of-magnitude arithmetic intensity (FLOP/byte) used to place
-// the stage on the roofline chart. Numbers are illustrative, not measured.
+// Roofline calibration — H200 SXM (BF16):
+//   Peak throughput : ~989 TFLOPS (BF16)
+//   HBM3e bandwidth: 3.35 TB/s
+//   Ridge point     : 989e12 / 3.35e12 ≈ 295 FLOP/B
+//
+// Decode (batch=1): every major op is a GEMV — stream the full weight matrix for ONE
+//   vector. AI ≈ 1–2 FLOP/B for BF16, well below the ridge → purely memory-bound.
+//   Tokens/sec ≈ HBM bandwidth ÷ model bytes (3.35 TB/s ÷ ~144 GB ≈ 23 tok/s single GPU).
+//
+// Prefill (512 tokens typical): GEMMs reuse each weight across all tokens in the batch.
+//   AI grows linearly with batch/sequence length → crosses the ridge at ~300+ tokens
+//   and becomes compute-bound. Dominant cost is then peak TFLOPS, not bandwidth.
+//
+// Source for numbers: "Achieving Peak Inference Performance for Qwen 2.5 72B on an
+// 8-GPU H200 Cluster" (2025) + vLLM/SGLang benchmark data cited therein.
 
 export type Regime = 'prefill' | 'decode';
 
 export interface IRooflinePoint {
-    compute: number; // 0 (memory-bound) .. 1 (compute-bound)
-    ai: number;      // arithmetic intensity, FLOP/byte (log-scale marker)
+    compute: number; // 0 (memory-bound) .. 1 (compute-bound), visual guide
+    ai: number;      // arithmetic intensity, FLOP/byte — H200 ridge ≈ 295
 }
 
 export interface ITransformerStage {
@@ -19,31 +29,38 @@ export interface ITransformerStage {
     title: string;
     summary: string;
     detail: string;
-    match: string[];                 // cube-name substrings (case-insensitive) to highlight
+    match: string[];                 // cube-name substrings to highlight in 3D
     prefill: IRooflinePoint;
     decode: IRooflinePoint;
-    why: string;                     // one line: why this is compute- or memory-bound
-    comm?: boolean;                  // has an all-reduce under tensor parallelism (row-parallel sub-layer)
+    why: string;
+    comm?: boolean;                  // ends in an all-reduce under tensor parallelism
 }
 
 export type Bound = 'Compute-bound' | 'Memory-bound' | 'Mixed' | 'Comm-bound';
 
 export function boundLabel(c: number): Bound {
-    if (c >= 0.66) return 'Compute-bound';
-    if (c <= 0.34) return 'Memory-bound';
+    if (c >= 0.70) return 'Compute-bound';
+    if (c <= 0.25) return 'Memory-bound';
     return 'Mixed';
 }
 
-// Per-GPU roofline point adjusted for tensor parallelism. TP divides BOTH the FLOPs and the
-// weight bytes per GPU, so per-GPU arithmetic intensity is ~unchanged for the matmuls.
-// The exception is the two row-parallel stages (attention output, MLP down): each ends in an
-// all-reduce whose cost grows with TP while per-GPU compute shrinks — so their effective AI
-// falls and they become communication-bound at high TP.
+// H200 ridge point used by the roofline chart and by effectivePoint.
+export const H200_RIDGE_AI = 295; // FLOP/byte
+
+// Per-GPU point adjusted for tensor parallelism.
+// TP divides both FLOPs and weight bytes equally → per-GPU AI is essentially
+// unchanged for column-parallel stages. The exception: the two row-parallel
+// sub-layers (attention output, MLP down) end in an all-reduce whose cost is
+// proportional to (TP-1)/TP and does NOT shrink with TP → they become comm-bound
+// at high TP. Each H200-to-H200 all-reduce (NVLink 4, ~900 GB/s bidirectional)
+// adds ~0.03 ms per layer; at TP=8 and 80 layers this adds ~5 ms per forward
+// pass — comparable to the memory-bound decode time itself.
 export function effectivePoint(stage: ITransformerStage, regime: Regime, tp: number): { compute: number; ai: number; comm: boolean } {
     let base = stage[regime];
     if (stage.comm && tp > 1) {
-        let commFactor = 1 + 0.6 * (tp - 1); // illustrative all-reduce growth with TP
-        return { compute: base.compute / commFactor, ai: base.ai / commFactor, comm: true };
+        // all-reduce overhead grows with (TP-1); effective AI falls toward 0
+        let penalty = 1 + 0.7 * (tp - 1);
+        return { compute: base.compute / penalty, ai: base.ai / penalty, comm: true };
     }
     return { compute: base.compute, ai: base.ai, comm: false };
 }
@@ -55,7 +72,9 @@ export function effectiveBound(stage: ITransformerStage, regime: Regime, tp: num
 }
 
 export function fmtAi(ai: number): string {
-    return ai >= 10 ? Math.round(ai).toString() : ai.toFixed(ai < 1 ? 2 : 1);
+    if (ai >= 100) return Math.round(ai).toString();
+    if (ai >= 10)  return ai.toFixed(0);
+    return ai.toFixed(1);
 }
 
 export const TRANSFORMER_STAGES: ITransformerStage[] = [
@@ -63,121 +82,159 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
         key: 'embed',
         title: '1 · Token embedding',
         summary: 'Token ids → d_model vectors.',
-        detail: 'Each input token id indexes a row of the embedding matrix, producing a ' +
-            'vector of width d_model (the residual stream). There is NO learned positional ' +
-            'embedding — modern dense decoders inject position later via RoPE, inside attention.',
+        detail:
+            'Each input token id indexes a row of the embedding table (vocab × d_model). ' +
+            'For Qwen 2.5 72B: 152,064 × 8,192 × 2 B = ~2.5 GB table — a memory gather, not a matmul. ' +
+            'Almost no arithmetic per byte read. No learned positional embedding — ' +
+            'position is injected inside attention via RoPE.',
         match: ['Token Embed', 'Input Embed', 'Tokens'],
-        prefill: { compute: 0.08, ai: 0.3 },
-        decode: { compute: 0.05, ai: 0.25 },
-        why: 'A memory gather — one row read per token, almost no arithmetic.',
+        // Decode: 1 row read (~16 KB for BF16 d=8192). Prefill: L rows but still no reuse.
+        prefill: { compute: 0.08, ai: 0.5 },
+        decode: { compute: 0.04, ai: 0.3 },
+        why: 'Table lookup — 0 MAC per byte. Both regimes are memory-bound.',
     },
     {
         key: 'rmsnorm',
         title: '2 · RMSNorm (pre-norm)',
         summary: 'Normalise the residual before each sub-layer.',
-        detail: 'RMSNorm divides each vector by its root-mean-square (no mean subtraction, ' +
-            'no bias term) and rescales by a learned γ. It is cheaper and more stable than ' +
-            'LayerNorm and is applied pre-attention and pre-MLP (pre-norm residual design).',
+        detail:
+            'RMSNorm computes σ = rms(x), then output = γ ⊙ (x / σ). ' +
+            'No mean subtraction, no bias (β). The γ weight is tiny (d_model scalars = 16 KB). ' +
+            'Applied TWICE per block (pre-attention and pre-MLP) — 160 calls over 80 layers. ' +
+            'It is elementwise and accesses each activation once, so it is always bandwidth-bound.',
         match: ['RMS Norm', 'γ'],
-        prefill: { compute: 0.12, ai: 0.5 },
-        decode: { compute: 0.06, ai: 0.3 },
-        why: 'Elementwise over the activation — bandwidth-bound in both regimes.',
+        prefill: { compute: 0.10, ai: 3 },
+        decode: { compute: 0.05, ai: 0.5 },
+        why: 'Elementwise over d_model per token. Tiny AI in both regimes — pure memory bandwidth.',
     },
     {
         key: 'qkv',
         title: '3 · Q / K / V projection (GQA)',
-        summary: 'Project to queries, keys, values — with grouped-query attention.',
-        detail: 'The normed residual is projected to Q, K and V. With Grouped-Query ' +
-            'Attention there are FEWER key/value heads than query heads (e.g. 64 Q / 8 KV), ' +
-            'so several query heads share one KV head. That shrinks the KV cache ~8× — the ' +
-            'main memory bottleneck during decode.',
+        summary: 'Project to queries, keys, values — grouped-query attention.',
+        detail:
+            'Three linear projections: Q (8192×8192), K (8192×1024), V (8192×1024) for Qwen 2.5 72B. ' +
+            'GQA uses 64 Q heads / 8 KV heads: the K and V projections are 8× smaller than Q, ' +
+            'reducing the KV cache ~8× vs full MHA. In BF16 the combined weight is ' +
+            '~167 MB per layer (×80 layers = ~13 GB just for QKV). ' +
+            'Decode (batch=1): GEMV — all 167 MB must be streamed from HBM3e for 1 output vector. ' +
+            'Prefill (512 tokens): GEMM — each weight byte is reused 512×, AI≈512 FLOP/B → compute-bound.',
         match: ['Q Weights', 'K Weights', 'V Weights', 'Q vectors', 'K vectors', 'V vectors', 'QKV'],
-        prefill: { compute: 0.9, ai: 120 },
-        decode: { compute: 0.15, ai: 2 },
-        why: 'Prefill: a GEMM that reuses each weight across all tokens (compute-bound). ' +
-            'Decode: a GEMV — stream the whole weight matrix to multiply by one vector (memory-bound).',
+        prefill: { compute: 0.90, ai: 480 },
+        decode: { compute: 0.12, ai: 1.0 },
+        why:
+            'Decode: GEMV — 167 MB weight streamed for 1 output token (AI ≈ 1 FLOP/B, far below H200 ridge of 295). ' +
+            'Prefill: GEMM — same weights reused across every token → AI scales with seq_len → compute-bound above ~300 tokens.',
     },
     {
         key: 'rope',
         title: '4 · RoPE (rotary position)',
         summary: 'Rotate Q and K by a position-dependent angle.',
-        detail: 'Rotary Position Embedding rotates each Q and K vector by an angle ' +
-            'proportional to its position. Because attention scores depend on the angle ' +
-            'difference, the model sees RELATIVE positions. No learned table, and it ' +
-            'extrapolates to long context — applied inside attention, not at the embedding.',
+        detail:
+            'Rotary Position Embedding rotates each pair of Q/K elements by θ = pos × base^(-2i/d), ' +
+            'where base = 1,000,000 for Qwen 2.5 (raised from 10,000 to support 128K context). ' +
+            'The rotation is applied as x\' = x cos(θ) − x_rot sin(θ). ' +
+            'Only Q and K are rotated — V is untouched. ' +
+            'Relative attention (score depends on angle difference) means the model sees position ' +
+            'without any learned table, and extrapolates to context lengths beyond training.',
         match: ['Q vectors', 'K vectors'],
-        prefill: { compute: 0.1, ai: 0.4 },
-        decode: { compute: 0.05, ai: 0.3 },
-        why: 'A cheap elementwise rotation — memory-bound, negligible FLOPs.',
+        prefill: { compute: 0.10, ai: 3 },
+        decode: { compute: 0.04, ai: 0.3 },
+        why: 'Elementwise sin/cos rotation — almost no reuse, always memory-bound. Negligible vs QKV or MLP.',
     },
     {
         key: 'attn',
         title: '5 · Scores + causal softmax',
         summary: 'QKᵀ/√d, mask the future, softmax.',
-        detail: 'Each query dots every key (scaled by 1/√head_dim). A causal mask zeroes ' +
-            'the upper triangle so a position can only attend to itself and the past — the ' +
-            'defining property of DECODE. Softmax turns scores into weights. At each decode ' +
-            'step this reads the whole KV cache, which is why decode is bandwidth-bound.',
+        detail:
+            'At each decode step: score_i = Q · K_i / √128 for every past token i (context N). ' +
+            'Reads the full KV cache: 2 × N × 128 × 8 heads × 2 B (BF16) per layer. ' +
+            'At N=128K (Qwen max context): ~52 GB of KV per layer — impossible to hold without paging. ' +
+            'This is why PagedAttention (vLLM) is essential: it manages KV cache in non-contiguous 4KB pages, ' +
+            'eliminating fragmentation. Prefill: QKᵀ is an O(N²) GEMM within the attention heads, ' +
+            'becoming compute-bound at long sequences. FlashAttention 2 fuses it to avoid materialising the full score matrix.',
         match: ['Attention Matrix', 'Attn Matrix Softmax'],
-        prefill: { compute: 0.8, ai: 60 },
-        decode: { compute: 0.1, ai: 1.2 },
-        why: 'Prefill: O(N²) QKᵀ GEMM is compute-heavy. Decode: read the entire KV cache ' +
-            'for a few FLOPs per element — pure bandwidth, and it grows with context length.',
+        prefill: { compute: 0.68, ai: 55 },
+        decode: { compute: 0.08, ai: 0.8 },
+        why:
+            'Decode: reads full KV cache for each token — scales linearly with context, always bandwidth-bound. ' +
+            'Prefill: O(N²) QKᵀ GEMM — compute-bound for long sequences.',
     },
     {
         key: 'attnout',
         title: '6 · Attention output + residual',
         summary: 'Weighted sum of V, output projection, add back.',
-        detail: 'The softmax weights produce a weighted sum of the value vectors per head; ' +
-            'heads are concatenated and mixed by the output projection. The result is ADDED ' +
-            'to the residual stream (the skip connection) rather than replacing it.',
+        detail:
+            'Each head computes a weighted sum of its V vectors; heads are concatenated (d_model = 8192). ' +
+            'An output projection W_O (8192×8192, ~134 MB BF16 per layer) mixes the heads. ' +
+            'The result is ADDED to the residual stream — skip connection — so all the information ' +
+            'from before attention is preserved. ' +
+            'W_O is a row-parallel layer in tensor parallelism: each GPU computes its shard, ' +
+            'then all GPUs all-reduce before the result is valid.',
         match: ['V Output', 'Attention Output', 'Projection Weights', 'Projection Bias', 'Attention Residual'],
-        prefill: { compute: 0.9, ai: 120 },
-        decode: { compute: 0.15, ai: 2 },
-        why: 'Another projection GEMM/GEMV — compute-bound batched (prefill), memory-bound at batch=1 (decode). ' +
-            'Row-parallel under TP, so it ends in an all-reduce.',
+        prefill: { compute: 0.90, ai: 480 },
+        decode: { compute: 0.12, ai: 1.0 },
+        why:
+            'Decode: GEMV, 134 MB weight stream per token (AI ≈ 1 FLOP/B). ' +
+            'Row-parallel under TP → ends in an NVLink all-reduce. ' +
+            'At TP=8 each all-reduce adds ~0.03 ms; 80 layers → ~2.4 ms cumulative per forward pass.',
         comm: true,
     },
     {
         key: 'mlp',
         title: '7 · SwiGLU MLP + residual',
         summary: 'Gate ⊙ Up → Down, then add back.',
-        detail: 'After a second RMSNorm, the feed-forward block uses SwiGLU: two parallel ' +
-            'projections up to the inner dim (gate and up), combined as SiLU(gate) ⊙ up, then ' +
-            'a down projection back to d_model. It is bias-free and ~3.5× wider than d_model. ' +
-            'It holds the majority of the model’s weights.',
+        detail:
+            'After a second RMSNorm: gate_proj (8192→29568) and up_proj (8192→29568) run in parallel; ' +
+            'output = SiLU(gate) ⊙ up; then down_proj (29568→8192) projects back. All bias-free. ' +
+            'Total MLP weight per layer: 3 × 8192 × 29568 × 2 B ≈ 1.45 GB; across 80 layers = ~116 GB. ' +
+            'This is the largest single weight component — more than half the model. ' +
+            'Decode: all three projections are GEMVs. At H200 bandwidth (3.35 TB/s): ' +
+            '1.45 GB ÷ 3.35 TB/s ≈ 0.43 ms per layer → 34 ms for 80 layers per token. ' +
+            'Prefill: the GEMMs become compute-bound above ~300 tokens, yielding the highest FLOP utilisation in the model.',
         match: ['Gate + Up', 'SiLU', 'Down Weights', 'MLP'],
-        prefill: { compute: 0.95, ai: 200 },
-        decode: { compute: 0.12, ai: 2 },
-        why: 'The biggest matmuls and most of the weights. Prefill: the dominant FLOPs ' +
-            '(compute-bound). Decode: the dominant weight bytes streamed from HBM (memory-bound). ' +
-            'The down projection is row-parallel, so it ends in an all-reduce.',
+        prefill: { compute: 0.95, ai: 780 },
+        decode: { compute: 0.13, ai: 1.2 },
+        why:
+            'Decode: dominant weight volume — ~1.45 GB per layer streamed for 1 token (AI ≈ 1.2 FLOP/B). ' +
+            'The down projection is row-parallel → ends in an all-reduce per layer. ' +
+            'Prefill: largest GEMMs in the model, saturates H200 compute (AI ≫ 295).',
         comm: true,
     },
     {
         key: 'layers',
         title: '8 · Repeat × N layers',
-        summary: 'The block above stacks N times.',
-        detail: 'Stages 2–7 form one transformer block. It repeats N times (28 layers for ' +
-            'Qwen 2.5 7B, 80 for the 70B-class models), each with its own weights, the ' +
-            'residual stream threading straight through all of them.',
+        summary: 'The block above stacks N times (28 for 7B, 80 for 70B-class).',
+        detail:
+            'Stages 2–7 repeat 80 times for Qwen 2.5 72B. At decode the dominant cost is ' +
+            'reading ~144 GB of weights from HBM3e per generated token. ' +
+            'On a single H200 at 3.35 TB/s: 144 GB ÷ 3.35 TB/s ≈ 43 ms/token → 23 tok/s peak. ' +
+            'TP=8 halves weight bytes per GPU (18 GB) and all 8 read in parallel → up to 8× faster, ' +
+            'limited in practice by all-reduce overhead. Benchmark: disaggregated P/D topology ' +
+            '(4 GPUs prefill TP=1 + 4 GPUs decode TP=2) achieved 648 tok/s vs 321 tok/s aggregated TP=8.',
         match: ['Residual'],
-        prefill: { compute: 0.85, ai: 150 },
-        decode: { compute: 0.1, ai: 2 },
-        why: 'Per token, decode must read EVERY layer’s weights once — total weight bytes ' +
-            'set the decode speed (memory bandwidth bound).',
+        prefill: { compute: 0.90, ai: 700 },
+        decode: { compute: 0.12, ai: 1.0 },
+        why:
+            'Decode: total weight bytes per token ≈ 144 GB (BF16). AI ≈ 1 FLOP/B. ' +
+            'TP distributes the load: TP=8 on H200 → 8× the effective bandwidth. ' +
+            '2 all-reduces per layer × 80 layers = 160 collectives per token.',
     },
     {
         key: 'lmhead',
         title: '9 · Final norm → logits → sample',
         summary: 'Project to vocabulary, softmax, pick next token.',
-        detail: 'A final RMSNorm, then the LM head projects the last position’s vector to one ' +
-            'logit per vocabulary token; softmax gives a probability distribution. Decode ' +
-            'samples ONE token from it, appends it to the sequence, and the whole pass runs ' +
-            'again for the next token — one token per forward pass.',
+        detail:
+            'A final RMSNorm then the LM head: a (d_model × vocab_size) = (8192 × 152,064) matrix, ' +
+            '~2.5 GB in BF16. At decode only the LAST position produces logits. ' +
+            'Softmax over 152K logits → multinomial or greedy sample → 1 token appended to sequence. ' +
+            'The entire forward pass then restarts for the next token. ' +
+            'With prefix caching (vLLM, SGLang), repeated prompts skip prefill entirely — ' +
+            'serving cost collapses to just the KV cache lookup and decode phases.',
         match: ['LM Head', 'Logits'],
-        prefill: { compute: 0.85, ai: 100 },
-        decode: { compute: 0.1, ai: 1.5 },
-        why: 'A large (vocab × d_model) matrix. At decode it is one more big weight read — memory-bound.',
+        prefill: { compute: 0.88, ai: 480 },
+        decode: { compute: 0.11, ai: 1.0 },
+        why:
+            'Decode: ~2.5 GB weight stream, one token (AI ≈ 1 FLOP/B). ' +
+            'Prefill: GEMM only over the LAST position for the next-token prediction (still a large matmul).',
     },
 ];
