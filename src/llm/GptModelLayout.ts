@@ -195,6 +195,12 @@ export type IGptLayerNormLayout = IGptModelLayout['ln_f'];
 export function genGptModelLayout(shape: IModelShape, gptGpuModel: IGptModelLink | null = null, offset: Vec3 = new Vec3(0, 0, 0)) {
     let { B, T, C, vocabSize, nHeads, A, nBlocks } = shape;
 
+    // Qwen / modern-arch derived params (defaults reproduce GPT-2 behaviour exactly)
+    let isQwen = shape.arch === 'qwen';
+    let nKVHeads = shape.nKVHeads ?? nHeads;     // GQA: how many distinct K/V heads exist
+    let kvGroup = Math.max(1, Math.floor(nHeads / nKVHeads)); // query heads sharing one KV head
+    let ffnDim = shape.ffnDim ?? C * 4;          // SwiGLU inner dim (Qwen) vs 4*C MLP (GPT-2)
+
     // work our way downwards from the top
     // x is to the left and right
     // y is positive going down, and the stack advances down from the top (at (0, 0, 0))
@@ -285,13 +291,16 @@ export function genGptModelLayout(shape: IModelShape, gptGpuModel: IGptModelLink
         name: 'Token Embed',
     });
 
+    // GPT-2 has a learned position-embedding table. Qwen uses RoPE (rotary embeddings)
+    // applied inside attention, so there is no learned position weight matrix to draw.
     let posEmbedObj = mk({
         t: 'w',
         xL: rightX, zM: 0, y: y,
         cx: T, cz: 1, cy: C,
         access: { src: gptGpuModel?.posEmbed.weight, x: [0, 1, 0], y: [1, 0, 0], scale: 10 },
         dimX: DimStyle.T, dimY: DimStyle.C,
-        name: 'Position Embed',
+        name: isQwen ? 'Position Embed (RoPE — applied in attention)' : 'Position Embed',
+        hidden: isQwen,
     });
 
     let residual0 = mk({
@@ -319,7 +328,7 @@ export function genGptModelLayout(shape: IModelShape, gptGpuModel: IGptModelLink
             access: { src: target?.normAgg, x: [0, 1, 0], y: [1, 0, T], scale: 10.0, channel: 'r' },
             deps: { add: [[src, 'xi']], special: BlKDepSpecial.LayerNormMu },
             dimX: DimStyle.T, dimY: DimStyle.None, small: true,
-            name: 'LN Agg: μ, σ',
+            name: isQwen ? 'RMS Agg: σ' : 'LN Agg: μ, σ',
         });
         let lnAgg2 = mk({
             t: 'a', cx: T, cz: B, cy: 1, y: y + cell,
@@ -345,6 +354,7 @@ export function genGptModelLayout(shape: IModelShape, gptGpuModel: IGptModelLink
             access: { src: target?.normBias, x: [1, 0, 0], y: [0, 1, 0] },
             dimX: DimStyle.None, dimY: DimStyle.C,
             name: 'β', small: true,
+            hidden: isQwen, // RMSNorm has no bias (β) and no mean-subtraction
         });
         let lnResid = mk({
             t: 'i', cx: T, cz: B, cy: C, y: y,
@@ -352,7 +362,7 @@ export function genGptModelLayout(shape: IModelShape, gptGpuModel: IGptModelLink
             access: { src: target?.output, x: [0, 1, 0], y: [1, 0, T], scale: 1.0 },
             deps: { add: [[src, 'xy'], [lnAgg1, 'xi'], [lnAgg2, 'xi'], [lnSigma, '0y'], [lnMu, '0y']], special: BlKDepSpecial.LayerNorm }, // lnSigma is really mul rather than add
             dimX: DimStyle.T, dimY: DimStyle.C,
-            name: 'Layer Norm',
+            name: isQwen ? 'RMS Norm' : 'Layer Norm',
         });
         let lnCubes = [lnAgg1, lnAgg2, lnSigma, lnMu, lnResid];
         return { lnAgg1, lnAgg2, lnResid, lnSigma, lnMu, cubes: lnCubes };
@@ -381,6 +391,9 @@ export function genGptModelLayout(shape: IModelShape, gptGpuModel: IGptModelLink
 
         let heads = [];
         for (let i = 0; i < nHeads; i++) {
+            // GQA: only every kvGroup-th query head owns a distinct K/V head; the rest
+            // share it. For full MHA (GPT-2) kvGroup === 1, so every head is a KV rep.
+            let isKVRep = !isQwen || (i % kvGroup === 0);
             let headZMid = headWidth * i - (nHeads - 1) * headWidth / 2;
             let qMid = headZMid + B * cell + qkvMargin;
             let kMid = headZMid;
@@ -527,8 +540,12 @@ export function genGptModelLayout(shape: IModelShape, gptGpuModel: IGptModelLink
                 name: 'V Output',
             });
 
-            let headCubes = [...isLargeModel ? [qkvWeightBlock, qkvBlock] : [qWeightBlock, kWeightBlock, vWeightBlock, qBlock, kBlock, vBlock],
-                qBiasBlock, kBiasBlock, vBiasBlock,
+            // GQA: shared (non-rep) heads don't draw their own K/V weight/vector/bias columns.
+            let kvCubes = isKVRep ? [kWeightBlock, vWeightBlock] : [];
+            let kvVecCubes = isKVRep ? [kBlock, vBlock] : [];
+            let kvBiasCubes = isKVRep ? [kBiasBlock, vBiasBlock] : [];
+            let headCubes = [...isLargeModel ? [qkvWeightBlock, qkvBlock] : [qWeightBlock, ...kvCubes, qBlock, ...kvVecCubes],
+                qBiasBlock, ...kvBiasCubes,
                 attnMtx, attnMtxAgg1, attnMtxAgg2, attnMtxSm, vOutBlock];
 
             let headLabel = mkLabel(1.0, headCubes);
@@ -607,62 +624,67 @@ export function genGptModelLayout(shape: IModelShape, gptGpuModel: IGptModelLink
 
         let ln2 = createLn(0, attnResidual, target?.ln_2);
 
+        // GPT-2 MLP: fc (C -> 4C) -> GELU -> proj (4C -> C), both with bias.
+        // Qwen SwiGLU: gate & up (C -> ffnDim) -> SiLU(gate) ⊙ up -> down (ffnDim -> C), bias-free.
+        // The fc block here represents the combined gate+up projection at width ffnDim.
         let mlpFcWeight = mk({
-            t: 'w', cx: C * 4, cz: 1, cy: C, y: y,
+            t: 'w', cx: ffnDim, cz: 1, cy: C, y: y,
             xR: attnLeftX, zM: 0,
             access: { src: target?.mlp.fcLayer.weight, x: [0, 1, 0], y: [1, 0, 0], scale: C * 0.5 },
             dimX: DimStyle.C4, dimY: DimStyle.C,
-            name: 'MLP Weights',
+            name: isQwen ? 'Gate + Up Weights (SwiGLU)' : 'MLP Weights',
         });
 
         let mlpFcBias = mk({
-            t: 'w', cx: C * 4, cz: 1, cy: 1, y: y - 1 * cell - margin,
+            t: 'w', cx: ffnDim, cz: 1, cy: 1, y: y - 1 * cell - margin,
             xR: attnLeftX, zM: 0,
             access: { src: target?.mlp.fcLayer.bias!, x: [0, 1, 0], y: [1, 0, 0], scale: C * 0.5 },
             dimX: DimStyle.C4, dimY: DimStyle.None,
             name: 'MLP Bias', small: true,
+            hidden: isQwen, // Qwen 2.5 FFN projections are bias-free
         });
 
         y += C * cell + margin;
 
         let mlpFc = mk({
-            t: 'i', cx: C * 4, cz: B, cy: T, y: y,
+            t: 'i', cx: ffnDim, cz: B, cy: T, y: y,
             xR: attnLeftX, zM: 0,
             access: { src: target?.mlp.fcLayer.output, x: [1, 0, 0], y: [0, 1, T], scale: 1.0 },
             deps: { dot: [[mlpFcWeight, 'xi'], [ln2.lnResid, 'yi']], dotLen: C, add: [[mlpFcBias, 'x']] },
             dimX: DimStyle.C4, dimY: DimStyle.T,
-            name: 'MLP',
+            name: isQwen ? 'Gate + Up' : 'MLP',
             transpose: true,
         });
 
         y += T * cell + margin;
 
         let mlpAct = mk({
-            t: 'i', cx: C * 4, cz: B, cy: T, y: y,
+            t: 'i', cx: ffnDim, cz: B, cy: T, y: y,
             xR: attnLeftX, zM: 0,
             access: { src: target?.mlp.mlpGelu, x: [1, 0, 0], y: [0, 1, T], scale: 1.0 },
             deps: { add: [[mlpFc, 'xy']], special: BlKDepSpecial.Gelu },
             dimX: DimStyle.C4, dimY: DimStyle.T,
-            name: 'MLP Activation',
+            name: isQwen ? 'SiLU(Gate) ⊙ Up' : 'MLP Activation',
             transpose: true,
         });
 
         y += T * cell + margin;
 
         let mlpProjWeight = mk({
-            t: 'w', cx: C * 4, cz: 1, cy: C, y: y,
+            t: 'w', cx: ffnDim, cz: 1, cy: C, y: y,
             xR: attnLeftX, zM: 0,
             access: { src: target?.mlp.projLayer.weight, x: [1, 0, 0], y: [0, 1, 0], scale: C * 0.5 },
             dimX: DimStyle.C4, dimY: DimStyle.C,
-            name: 'MLP Projection Weights',
+            name: isQwen ? 'Down Weights (SwiGLU)' : 'MLP Projection Weights',
         });
 
         let mlpProjBias = mk({
             t: 'w', cx: 1, cz: 1, cy: C, y: y,
-            xR: attnLeftX - C * 4 * cell - margin, zM: 0,
+            xR: attnLeftX - ffnDim * cell - margin, zM: 0,
             access: { src: target?.mlp.projLayer.bias!, x: [1, 0, 0], y: [0, 1, 0], scale: C * 0.5 },
             dimX: DimStyle.None, dimY: DimStyle.C, small: true,
             name: 'MLP Projection Bias',
+            hidden: isQwen, // bias-free down projection
         });
 
         let mlpResult = mk({

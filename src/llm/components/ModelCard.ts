@@ -40,6 +40,7 @@ export function drawModelCard(state: IProgramState, layout: IGptModelLayout, tit
 
     // let w = measureTextWidth(state.modelFontBuf, title, .0);
     let { B, C, T, A, nBlocks, nHeads, vocabSize } = layout.shape;
+    let { arch, nKVHeads, ffnDim } = layout.shape;
 
     let midX = (tl.x + br.x) / 2;
     let paramLeft = br.x - 50;
@@ -73,6 +74,14 @@ export function drawModelCard(state: IProgramState, layout: IGptModelLayout, tit
 
     writeTextToBuffer(render.modelFontBuf, nParamsText, titleColor, weightX, paramOff - paramFontScale / 2, paramFontScale, mtx);
     writeTextToBuffer(render.modelFontBuf, weightCountText, titleColor, weightX + weightTitleW, paramOff - weightSize / 2, weightSize, mtx);
+
+    // Architecture caption — calls out the modern-arch ops for Qwen-class models.
+    if (arch === 'qwen') {
+        let archText = `GQA ${nHeads}Q/${nKVHeads ?? nHeads}KV  ·  SwiGLU (ffn ${ffnDim ?? C * 4})  ·  RMSNorm  ·  RoPE`;
+        let archScale = paramFontScale;
+        let archW = measureTextWidth(render.modelFontBuf, archText, archScale);
+        writeTextToBuffer(render.modelFontBuf, archText, dimStyleColor(DimStyle.n_heads), midX - archW / 2, paramOff + weightSize / 2 + 2, archScale, mtx);
+    }
     // addParam("C (channels) = ", C.toString(), dimStyleColor(DimStyle.C));
     // addParam("T (time) = ", T.toString(), dimStyleColor(DimStyle.T));
     // addParam("B (batches) = ", B.toString(), dimStyleColor(DimStyle.B));

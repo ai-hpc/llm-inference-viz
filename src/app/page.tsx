@@ -1,9 +1,6 @@
-import React from 'react';
-import { HomePage } from '@/src/homepage/HomePage';
+import { redirect } from 'next/navigation';
 
+// This fork is the Qwen LLM visualization only; the root path opens the viz directly.
 export default function Page() {
-    return <>
-        <HomePage />
-        <div id="portal-container"></div>
-    </>;
+    redirect('/llm');
 }

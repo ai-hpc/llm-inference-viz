@@ -137,6 +137,41 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
         vocabSize: 50257,
     };
 
+    // Qwen 2.5 72B Instruct — true-scale structural shape.
+    // Real config: hidden 8192, 64 query heads / 8 KV heads (GQA 8:1), head dim 128,
+    // 80 layers, SwiGLU FFN inner dim 29568, vocab 152064, 128K (131072) context.
+    let qwen72bShape: IModelShape = {
+        B: 1,
+        T: 1024,          // visual token window; real model trains to 131072
+        C: 8192,
+        nHeads: 64,
+        nKVHeads: 8,
+        A: 128,           // head dim (8192 / 64)
+        nBlocks: 80,
+        ffnDim: 29568,
+        vocabSize: 152064,
+        arch: 'qwen',
+        normEps: 1e-6,
+        ropeTheta: 1000000,
+    };
+
+    // Down-scaled Qwen-architecture twin: same operators (RMSNorm, RoPE, GQA, SwiGLU,
+    // bias-free FFN) at tiny dims so the per-cell detail renders. GQA ratio preserved at 4:1.
+    let qwenNanoShape: IModelShape = {
+        B: 1,
+        T: 11,
+        C: 64,
+        nHeads: 8,
+        nKVHeads: 2,
+        A: 8,
+        nBlocks: 4,
+        ffnDim: 176,
+        vocabSize: 6,
+        arch: 'qwen',
+        normEps: 1e-6,
+        ropeTheta: 1000000,
+    };
+
     function makeCamera(center: Vec3, angle: Vec3): ICameraPos {
         return { center, angle };
     }
@@ -186,6 +221,22 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
             modelCardOffset: delta.mul(15.0),
             blockRender: initBlockRender(render?.ctx ?? null),
             camera: makeCamera(new Vec3(837678.163, 0.000, -485242.286), new Vec3(238.959, 10.501, 12583.939)),
+        }, {
+            name: 'Qwen 2.5 72B',
+            enabled: false,
+            shape: qwen72bShape,
+            offset: delta.mul(90.0),
+            modelCardOffset: delta.mul(15.0),
+            blockRender: initBlockRender(render?.ctx ?? null),
+            camera: makeCamera(new Vec3(837678.163, 0.000, -485242.286), new Vec3(238.959, 10.501, 12583.939)),
+        }, {
+            name: 'Qwen (nano)',
+            enabled: false,
+            shape: qwenNanoShape,
+            offset: delta.mul(130.0),
+            modelCardOffset: delta.mul(2.0),
+            blockRender: initBlockRender(render?.ctx ?? null),
+            camera: makeCamera(new Vec3(42.771, 0.000, -569.287), new Vec3(284.959, 26.501, 12.867)),
         }],
         gptGpuModel: null,
         jsGptModel: null,

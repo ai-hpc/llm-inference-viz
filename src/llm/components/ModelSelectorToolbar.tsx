@@ -64,6 +64,8 @@ export const ModelSelectorToolbar: React.FC<{
             {makeButton(-1)}
             {makeButton(1)}
             {makeButton(2)}
+            {makeButton(3)}
+            {makeButton(4)}
         </div>
         <div className='ml-2 flex flex-row'>
             <div className={clsx('m-2 p-2 bg-white min-w-[2rem] flex justify-center rounded shadow cursor-pointer hover:bg-blue-300')} onClick={onExpandClick}>

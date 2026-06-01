@@ -15,6 +15,13 @@ export interface IModelShape {
     nHeads: number;
     T: number;
     A: number;
+
+    // --- Qwen / modern-arch extensions (all optional; absent => GPT-2 behaviour) ---
+    arch?: 'gpt' | 'qwen';  // selects RMSNorm + RoPE + GQA + SwiGLU when 'qwen'
+    nKVHeads?: number;      // GQA: number of key/value heads. Defaults to nHeads (full MHA).
+    ffnDim?: number;        // FFN inner dimension. Defaults to 4*C (GPT-2). Qwen uses ~3.6*C via SwiGLU.
+    normEps?: number;       // layer/rms norm epsilon (display only)
+    ropeTheta?: number;     // RoPE base (display only)
 }
 
 export interface ILayerBuilder {
