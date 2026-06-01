@@ -7,7 +7,7 @@ import { IRenderState, IRenderView } from './render/modelRender';
 import { fetchFontAtlasData, IFontAtlasData } from './render/fontRender';
 import { Random } from '@/src/utils/random';
 import { ITensorSet, TensorF32 } from '@/src/utils/tensor';
-import { ProgramStateContext, WalkthroughSidebar } from './Sidebar';
+import { ProgramStateContext } from './Sidebar';
 import { initProgramState, IProgramState, runProgram } from './Program';
 import { CanvasEventSurface } from './CanvasEventSurface';
 import { Vec3 } from '@/src/utils/vector';
@@ -18,7 +18,6 @@ import { useScreenLayout } from '@/src/utils/layout';
 import { jumpPhase } from './Commentary';
 import { WelcomePopup } from './WelcomePopup';
 import { KeyboardManagerContext, KeyboardOrder, useGlobalKeyboard } from '@/src/utils/keyboard';
-import { Resizer } from '../utils/Resizer';
 import { ModelSelectorToolbar } from './components/ModelSelectorToolbar';
 
 async function fetchTensorData(url: string): Promise<ITensorSet> {
@@ -186,12 +185,6 @@ export function LayerView() {
         }
     }, [canvasRender, layout]);
 
-    let sidebar = canvasRender && <div className={s.sidebar}>
-        <ProgramStateContext.Provider value={canvasRender.progState}>
-            <WalkthroughSidebar />
-        </ProgramStateContext.Provider>
-    </div>;
-
     let mainView = <div className={s.canvasWrap}>
         <canvas
             className={s.canvas}
@@ -217,11 +210,7 @@ export function LayerView() {
     </div>;
 
     return <div className={s.view}>
-        <Resizer id={"llm-sidebar"} className={"flex-1"} vertical={!layout.isDesktop} defaultFraction={0.4}>
-            {layout.isDesktop && sidebar}
-            {mainView}
-            {!layout.isDesktop && sidebar}
-        </Resizer>
+        {mainView}
     </div>;
 }
 

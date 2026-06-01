@@ -10,27 +10,6 @@ export const ModelSelectorToolbar: React.FC<{
 }> = () => {
     let progState = useProgramState();
 
-    function makeButton(egIndex: number) {
-
-        let example = progState.examples[egIndex] ?? progState.mainExample;
-
-        let isEnabled = example.enabled;
-        let isActive = progState.currExampleId === egIndex;
-
-        function handleClick() {
-            if (!isEnabled) {
-                example.enabled = true;
-            }
-            progState.currExampleId = egIndex;
-            progState.camera.desiredCamera = example.camera;
-            progState.markDirty();
-        }
-
-        return <div className={clsx('m-2 p-2 rounded shadow cursor-pointer hover:bg-blue-300', isActive ? 'bg-blue-200' : 'bg-white')} onClick={handleClick}>
-            {example.name}
-        </div>;
-    }
-
     function onExpandClick() {
         let example = progState.examples[progState.currExampleId] ?? progState.mainExample;
         progState.camera.desiredCamera = example.camera;
@@ -59,14 +38,6 @@ export const ModelSelectorToolbar: React.FC<{
     }
 
     return <div className='absolute top-0 left-0 flex flex-col'>
-        <div className='mt-2 ml-2 flex flex-row'>
-            {makeButton(0)}
-            {makeButton(-1)}
-            {makeButton(1)}
-            {makeButton(2)}
-            {makeButton(3)}
-            {makeButton(4)}
-        </div>
         <div className='ml-2 flex flex-row'>
             <div className={clsx('m-2 p-2 bg-white min-w-[2rem] flex justify-center rounded shadow cursor-pointer hover:bg-blue-300')} onClick={onExpandClick}>
                 <FontAwesomeIcon icon={faExpand} />

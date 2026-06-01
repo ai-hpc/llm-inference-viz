@@ -19,7 +19,7 @@ import { drawBlockInfo } from "./components/BlockInfo";
 import { NativeFunctions } from "./NativeBindings";
 import { IWasmGptModel, stepWasmModel, syncWasmDataWithJsAndGpu } from "./GptModelWasm";
 import { IMovementInfo, manageMovement } from "./components/MovementControls";
-import { IBlockRender, initBlockRender } from "./render/blockRender";
+import { IBlockRender } from "./render/blockRender";
 import { ILayout } from "../utils/layout";
 import { DimStyle } from "./walkthrough/WalkthroughTools";
 import { Subscriptions } from "../utils/hooks";
@@ -86,9 +86,11 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
     let walkthrough = initWalkthrough();
 
     let prevState = SavedState.state;
+    // Framed for the Qwen 2.5 72B structural model at the origin. (Equivalent to the
+    // known-good example framing at offset (900000,0,0), translated back to origin.)
     let camera: ICamera = {
-        angle: prevState?.camera.angle ?? new Vec3(296, 16, 13.5),
-        center: prevState?.camera.center ?? new Vec3(-8.4, 0, -481.5),
+        angle: new Vec3(238.959, 10.501, 12583.939),
+        center: new Vec3(-62322.0, 0, -485242.286),
         transition: {},
         modelMtx: new Mat4f(),
         viewMtx: new Mat4f(),
@@ -97,47 +99,7 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
         camPosModel: new Vec3(),
     }
 
-    let shape: IModelShape = {
-        B: 1,
-        T: 11,
-        C: 48,
-        nHeads: 3,
-        A: 48 / 3,
-        nBlocks: 3,
-        vocabSize: 3,
-    };
-
-    let gpt2ShapeSmall: IModelShape = {
-        B: 1,
-        T: 1024,
-        C: 768,
-        nHeads: 12,
-        A: 768 / 12,
-        nBlocks: 12,
-        vocabSize: 50257,
-    };
-
-    let gpt2ShapeLarge: IModelShape = {
-        B: 1,
-        T: 1024,
-        C: 1600,
-        nHeads: 25,
-        A: 1600 / 25,
-        nBlocks: 48,
-        vocabSize: 50257,
-    };
-
-    let gpt3Shape: IModelShape = {
-        B: 1,
-        T: 1024,
-        C: 12288,
-        nHeads: 96,
-        A: 12288 / 96,
-        nBlocks: 96,
-        vocabSize: 50257,
-    };
-
-    // Qwen 2.5 72B Instruct — true-scale structural shape.
+    // Qwen 2.5 72B Instruct — the only model in this build.
     // Real config: hidden 8192, 64 query heads / 8 KV heads (GQA 8:1), head dim 128,
     // 80 layers, SwiGLU FFN inner dim 29568, vocab 152064, 128K (131072) context.
     let qwen72bShape: IModelShape = {
@@ -155,89 +117,30 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
         ropeTheta: 1000000,
     };
 
-    // Down-scaled Qwen-architecture twin: same operators (RMSNorm, RoPE, GQA, SwiGLU,
-    // bias-free FFN) at tiny dims so the per-cell detail renders. GQA ratio preserved at 4:1.
-    let qwenNanoShape: IModelShape = {
-        B: 1,
-        T: 11,
-        C: 64,
-        nHeads: 8,
-        nKVHeads: 2,
-        A: 8,
-        nBlocks: 4,
-        ffnDim: 176,
-        vocabSize: 6,
-        arch: 'qwen',
-        normEps: 1e-6,
-        ropeTheta: 1000000,
-    };
-
     function makeCamera(center: Vec3, angle: Vec3): ICameraPos {
         return { center, angle };
     }
-
-    let delta = new Vec3(10000, 0, 0);
 
     return {
         native: null,
         wasmGptModel: null,
         render: render!,
-        inWalkthrough: true,
+        inWalkthrough: false, // Qwen-only structural view; the nano-gpt guided walkthrough is disabled
         walkthrough,
         camera,
-        shape: shape,
-        layout: genGptModelLayout(shape),
+        shape: qwen72bShape,
+        layout: genGptModelLayout(qwen72bShape),
         currExampleId: -1,
         mainExample: {
-            name: 'nano-gpt',
+            name: 'Qwen 2.5 72B',
             enabled: true,
-            shape: shape,
+            shape: qwen72bShape,
             offset: new Vec3(),
             modelCardOffset: new Vec3(),
             blockRender: null!,
-            camera: makeCamera(new Vec3(42.771, 0.000, -569.287), new Vec3(284.959, 26.501, 12.867)),
+            camera: makeCamera(new Vec3(-62322.0, 0, -485242.286), new Vec3(238.959, 10.501, 12583.939)),
         },
-        examples: [{
-            name: 'GPT-2 (small)',
-            enabled: true,
-            shape: gpt2ShapeSmall,
-            offset: delta.mul(-5),
-            modelCardOffset: delta.mul(-2.0),
-            blockRender: initBlockRender(render?.ctx ?? null),
-            camera: makeCamera(new Vec3(-65141.321, 0.000, -69843.439), new Vec3(224.459, 24.501, 1574.240)),
-        }, {
-            name: 'GPT-2 (XL)',
-            enabled: true,
-            shape: gpt2ShapeLarge,
-            offset: delta.mul(20),
-            modelCardOffset: delta.mul(0.5),
-            blockRender: initBlockRender(render?.ctx ?? null),
-            camera: makeCamera(new Vec3(237902.688, 0.000, -47282.484), new Vec3(311.959, 23.501, 1382.449)),
-        }, {
-            name: 'GPT-3',
-            enabled: false,
-            shape: gpt3Shape,
-            offset: delta.mul(50.0),
-            modelCardOffset: delta.mul(15.0),
-            blockRender: initBlockRender(render?.ctx ?? null),
-            camera: makeCamera(new Vec3(837678.163, 0.000, -485242.286), new Vec3(238.959, 10.501, 12583.939)),
-        }, {
-            name: 'Qwen 2.5 72B',
-            enabled: false,
-            shape: qwen72bShape,
-            offset: delta.mul(90.0),
-            modelCardOffset: delta.mul(15.0),
-            blockRender: initBlockRender(render?.ctx ?? null),
-            camera: makeCamera(new Vec3(837678.163, 0.000, -485242.286), new Vec3(238.959, 10.501, 12583.939)),
-        }, {
-            name: 'Qwen (nano)',
-            enabled: false,
-            shape: qwenNanoShape,
-            offset: delta.mul(130.0),
-            modelCardOffset: delta.mul(2.0),
-            blockRender: initBlockRender(render?.ctx ?? null),
-            camera: makeCamera(new Vec3(42.771, 0.000, -569.287), new Vec3(284.959, 26.501, 12.867)),
-        }],
+        examples: [],
         gptGpuModel: null,
         jsGptModel: null,
         stepModel: false,
@@ -294,8 +197,8 @@ export function runProgram(view: IRenderView, state: IProgramState) {
         stepWasmModel(state.wasmGptModel, state.jsGptModel);
     }
 
-    // generate the base model, incorporating the gpu-side model if available
-    state.layout = genGptModelLayout(state.shape, state.jsGptModel);
+    // generate the base model. Qwen-only build renders structurally (no live weights).
+    state.layout = genGptModelLayout(state.shape, null);
 
     // @TODO: handle different models in the same scene.
     // Maybe need to copy a lot of different things like the entire render state per model?

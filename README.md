@@ -32,14 +32,22 @@ build-time `fetch`. Those routes were removed and `/` now redirects to `/llm`.
 See [`CUSTOMIZATIONS.md`](CUSTOMIZATIONS.md) for the full change rationale and the
 remaining work.
 
-## The two Qwen presets
+## Single model: Qwen 2.5 72B
 
-- **Qwen 2.5 72B** — true-scale structural view: 80 layers, hidden 8192, 64 Q / 8 KV
-  heads, head-dim 128, SwiGLU ffn 29568, vocab 152064. Like upstream's GPT-3 view, this
-  renders *structure at scale*, not every weight cell (72B cells cannot be drawn in a browser).
-- **Qwen (nano)** — a dimensionally-faithful down-scaled twin (C=64, 8 Q / 2 KV heads,
-  4 layers, ffn 176). Same operators, tiny dims, so the **per-cell detail renders** and you
-  can actually see the GQA 4:1 sharing, the SwiGLU activation, and the bias-free RMSNorm.
+This build renders **only Qwen 2.5 72B** — true-scale structural view: 80 layers, hidden
+8192, 64 Q / 8 KV heads, head-dim 128, SwiGLU ffn 29568, vocab 152064. Like upstream's
+GPT-3 view, this renders *structure at scale*, not every weight cell (72B cells cannot be
+drawn in a browser).
+
+The GPT-2/GPT-3 presets, the down-scaled "Qwen (nano)" twin, the model-selector buttons,
+and the nano-gpt guided **walkthrough sidebar** ("chapter overview") were all removed so
+the view is focused on the one model. Two camera controls remain top-left:
+**expand** (reset framing) and **magnify** (auto-frame the model) — plus mouse drag /
+scroll and WASD-or-arrow keys to navigate.
+
+> Note: the down-scaled Qwen twin and the modern-arch operator code still live in the
+> source (gated on `arch === 'qwen'`); only the *presets/UI* were removed. Re-add an
+> example entry in `Program.ts` to bring a detailed per-cell Qwen view back.
 
 ## Run locally
 
@@ -76,9 +84,9 @@ Stage 2 page, host this app (any static/Node host) and iframe it:
   for the tiny nano-gpt weights. The Qwen presets reuse the structural renderer; a
   numerically-running Qwen micro-model (GQA / RoPE / SwiGLU / RMSNorm in GLSL) is the
   documented follow-on in `CUSTOMIZATIONS.md`.
-- **Walkthrough narration** (the guided tour) is still GPT-2-specific; it is tied to the
-  nano-gpt main example. The Qwen presets are free-explore views. Rewriting the narration
-  for Qwen is listed as remaining work.
+- **Walkthrough narration** (the GPT-2 guided tour) was **removed** in this build, not
+  ported. If you later want a Qwen guided tour, the narration would need rewriting for
+  RMSNorm / GQA+RoPE / SwiGLU (see `CUSTOMIZATIONS.md`).
 
 ## Attribution & license
 
