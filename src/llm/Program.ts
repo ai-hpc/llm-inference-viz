@@ -106,13 +106,15 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
 
     // ---- Switchable models. All three share the modern-arch operator set
     // (RMSNorm + RoPE + GQA + SwiGLU), so arch: 'qwen' drives the geometry for all. ----
+    // T is the VISUAL token window (the 3D residual/attention blocks scale with it, so it
+    // must stay small to render). ctxLen is the analytics context used for KV-cache math.
 
     // Qwen 2.5 7B Instruct (DEFAULT). hidden 3584, 28 Q / 4 KV heads, head dim 128,
     // 28 layers, SwiGLU ffn 18944, vocab 152064.
     let qwen7bShape: IModelShape = {
         B: 1, T: 1024, C: 3584, nHeads: 28, nKVHeads: 4, A: 128,
         nBlocks: 28, ffnDim: 18944, vocabSize: 152064,
-        arch: 'qwen', normEps: 1e-6, ropeTheta: 1000000,
+        arch: 'qwen', normEps: 1e-6, ropeTheta: 1000000, ctxLen: 32768,
     };
 
     // Qwen 2.5 72B Instruct. hidden 8192, 64 Q / 8 KV heads, head dim 128,
@@ -120,7 +122,7 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
     let qwen72bShape: IModelShape = {
         B: 1, T: 1024, C: 8192, nHeads: 64, nKVHeads: 8, A: 128,
         nBlocks: 80, ffnDim: 29568, vocabSize: 152064,
-        arch: 'qwen', normEps: 1e-6, ropeTheta: 1000000,
+        arch: 'qwen', normEps: 1e-6, ropeTheta: 1000000, ctxLen: 32768,
     };
 
     // Llama 3.3 70B Instruct. hidden 8192, 64 Q / 8 KV heads, head dim 128,
@@ -128,7 +130,7 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
     let llama70bShape: IModelShape = {
         B: 1, T: 1024, C: 8192, nHeads: 64, nKVHeads: 8, A: 128,
         nBlocks: 80, ffnDim: 28672, vocabSize: 128256,
-        arch: 'qwen', normEps: 1e-5, ropeTheta: 500000,
+        arch: 'qwen', normEps: 1e-5, ropeTheta: 500000, ctxLen: 32768,
     };
 
     let modelSet: IModelPreset[] = [

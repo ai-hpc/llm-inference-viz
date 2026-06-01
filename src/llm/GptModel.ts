@@ -22,6 +22,7 @@ export interface IModelShape {
     ffnDim?: number;        // FFN inner dimension. Defaults to 4*C (GPT-2). Qwen uses ~3.6*C via SwiGLU.
     normEps?: number;       // layer/rms norm epsilon (display only)
     ropeTheta?: number;     // RoPE base (display only)
+    ctxLen?: number;        // analytics context length (KV-cache math). T is only the visual token window.
 }
 
 export interface ILayerBuilder {

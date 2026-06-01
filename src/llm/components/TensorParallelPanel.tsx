@@ -88,6 +88,15 @@ export const TensorParallelPanel: React.FC<{
     let ffnPerGpu  = (shape.ffnDim ?? shape.C * 4) / tp;
     let kvReplicated = tp > nKVHeads;
 
+    // KV cache for the configured context (batch 1, FP16):
+    //   2 (K+V) × layers × kv_heads × head_dim × ctx × 2 bytes
+    let ctxLen = shape.ctxLen ?? shape.T;
+    let ctxFmt = ctxLen >= 1024 ? `${Math.round(ctxLen / 1024)}K` : `${ctxLen}`;
+    let kvTotalBytes = 2 * shape.nBlocks * nKVHeads * shape.A * ctxLen * 2;
+    let kvShards = Math.min(tp, nKVHeads); // KV heads shard with TP, replicate beyond nKVHeads
+    let kvPerGpuBytes = kvTotalBytes / kvShards;
+    let gb = (bytes: number) => (bytes / 1e9 >= 10 ? (bytes / 1e9).toFixed(1) : (bytes / 1e9).toFixed(2)) + ' GB';
+
     let fp8AlignWarn = tp === 8; // Qwen FP8 + TP=8 known alignment issue
 
     let stat = (label: string, value: string, hint?: string) =>
@@ -136,6 +145,14 @@ export const TensorParallelPanel: React.FC<{
                 kvReplicated ? `${nKVHeads} (replicated)` : kvPerGpu.toFixed(0),
                 kvReplicated ? `TP>${nKVHeads} KV heads` : undefined)}
             {stat('MLP inner / GPU', fmtB(ffnPerGpu))}
+        </div>
+
+        {/* Context + KV cache (the context-length cost) */}
+        <div className="mt-1 border-t border-slate-100 pt-1">
+            {stat('Context (KV)', ctxFmt + ' tokens')}
+            {stat('KV cache @ ' + ctxFmt, gb(kvTotalBytes), 'FP16, batch 1')}
+            {stat('KV cache / GPU', gb(kvPerGpuBytes),
+                kvReplicated ? `÷${nKVHeads} (KV-head cap)` : `÷${tp}`)}
         </div>
 
         {/* Decode throughput estimate */}
