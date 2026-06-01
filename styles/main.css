@@ -2,6 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Clean, thin, unobtrusive scrollbar for the explainer panel */
+.clean-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+}
+.clean-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.clean-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+.clean-scroll::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+.clean-scroll::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+    background-clip: content-box;
+}
+
 button {
     /* clear all the cruft from the default button styles */
     border: none;

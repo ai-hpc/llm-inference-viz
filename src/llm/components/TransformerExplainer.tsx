@@ -66,7 +66,7 @@ export const TransformerExplainer: React.FC = () => {
 
     const courseUrl = 'https://github.com/ai-hpc/ai-hardware-engineer-roadmap/tree/main/Phase%205%20-%20Advanced%20Topics%20and%20Specialization/7.%20ML%20Systems%20Engineering/AI%20Inference%20Engineer%202026';
 
-    return <div className="h-full overflow-y-auto bg-gradient-to-b from-white to-slate-50 px-4 py-4 text-slate-800">
+    return <div className="clean-scroll h-full overflow-y-auto bg-gradient-to-b from-white to-slate-50 px-4 py-4 text-slate-800">
         {/* header */}
         <div className="flex items-center gap-2">
             <span className="h-5 w-1 rounded-full bg-gradient-to-b from-sky-500 to-violet-500" />

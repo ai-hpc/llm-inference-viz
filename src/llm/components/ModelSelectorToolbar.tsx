@@ -31,24 +31,32 @@ export const ModelSelectorToolbar: React.FC<{
         progState.markDirty();
     }
 
-    return <div className='absolute top-0 left-0 flex flex-col'>
-        <div className='mt-2 ml-2 flex flex-row flex-wrap items-center'>
+    return <div className='absolute top-3 left-3 flex flex-col items-start gap-2'>
+        {/* model selector — frosted-glass segmented pills */}
+        <div className='inline-flex flex-wrap items-center gap-1 rounded-xl border border-white/50 bg-white/70 p-1 shadow-lg ring-1 ring-black/5 backdrop-blur-md'>
             {progState.modelSet.map((preset, idx) => {
                 let isActive = progState.currentModelIdx === idx;
-                return <div
+                return <button
                     key={preset.name}
-                    className={clsx('m-2 p-2 rounded shadow cursor-pointer hover:bg-blue-300', isActive ? 'bg-blue-200 font-bold' : 'bg-white')}
                     onClick={() => selectModel(idx)}
+                    className={clsx('rounded-lg px-3 py-1.5 text-xs font-semibold transition-all',
+                        isActive
+                            ? 'bg-gradient-to-b from-sky-500 to-violet-500 text-white shadow-sm'
+                            : 'text-slate-600 hover:bg-white hover:text-slate-900')}
                 >
                     {preset.name}
-                </div>;
+                </button>;
             })}
         </div>
-        <div className='ml-2 flex flex-row'>
-            <div className={clsx('m-2 p-2 bg-white min-w-[2rem] flex justify-center rounded shadow cursor-pointer hover:bg-blue-300')} onClick={onExpandClick} title="Reset camera">
-                <FontAwesomeIcon icon={faExpand} />
-            </div>
-        </div>
+        {/* reset-view button */}
+        <button
+            onClick={onExpandClick}
+            title="Reset camera to frame the model"
+            className='inline-flex items-center gap-1.5 rounded-lg border border-white/50 bg-white/70 px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow-lg ring-1 ring-black/5 backdrop-blur-md transition-all hover:bg-white hover:text-slate-900'
+        >
+            <FontAwesomeIcon icon={faExpand} />
+            <span>Reset view</span>
+        </button>
     </div>;
 
 };
