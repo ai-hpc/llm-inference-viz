@@ -413,7 +413,7 @@ export function renderAllBlocks(blockRender: IBlockRender, layout: IModelLayout,
 
             blockBuf.set(cube.localMtx ?? new Mat4f(), baseOff + 12);
 
-            let color = (cube.t === 'w' ? Colors.Weights : cube.t === 'i' ? Colors.Intermediates : Colors.Aggregates);
+            let color = cube.shardColor ?? (cube.t === 'w' ? Colors.Weights : cube.t === 'i' ? Colors.Intermediates : Colors.Aggregates);
             let baseColor = new Vec4(color.x, color.y, color.z, cube.opacity);
             baseColor.writeToBuf(blockBuf, baseOff + 28);
 
@@ -520,7 +520,7 @@ export function renderAllBlocksInstanced(blockRender: IBlockRender, layout: IMod
 
                 buf.set(cube.localMtx ?? new Mat4f(), baseOff + 12);
 
-                let color = (cube.t === 'w' ? Colors.Weights : cube.t === 'i' ? Colors.Intermediates : Colors.Aggregates);
+                let color = cube.shardColor ?? (cube.t === 'w' ? Colors.Weights : cube.t === 'i' ? Colors.Intermediates : Colors.Aggregates);
                 let baseColor = new Vec4(color.x, color.y, color.z, cube.opacity);
                 baseColor.writeToBuf(buf, baseOff + 28);
 

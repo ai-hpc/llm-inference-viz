@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import clsx from 'clsx';
 import { IModelShape } from '../GptModel';
+import { useProgramState } from '../Sidebar';
+import { SHARD_HEX } from './shardColors';
 
 // Tensor-parallelism (TP) explorer. TP shards each weight matrix across N GPUs:
 // attention heads split column-wise, the MLP split column-then-row, with an all-reduce
@@ -39,10 +41,11 @@ function ShardDiagram({ tp }: { tp: number }) {
     let boxes = [];
     for (let i = 0; i < tp; i++) {
         let x = x0 + i * (boxW + gap);
+        let hex = SHARD_HEX[i % SHARD_HEX.length];
         boxes.push(
             <g key={i}>
-                <rect x={x} y={4} width={boxW} height={boxH} rx={3} fill="#e0e7ff" stroke="#6366f1" strokeWidth={0.8} />
-                <text x={x + boxW / 2} y={4 + boxH / 2 + 3} textAnchor="middle" fontSize={tp > 4 ? 7 : 8} fill="#3730a3" fontWeight="bold">
+                <rect x={x} y={4} width={boxW} height={boxH} rx={3} fill={hex} fillOpacity={0.25} stroke={hex} strokeWidth={1} />
+                <text x={x + boxW / 2} y={4 + boxH / 2 + 3} textAnchor="middle" fontSize={tp > 4 ? 7 : 8} fill={hex} fontWeight="bold">
                     GPU{i}
                 </text>
                 <line x1={x + boxW / 2} y1={4 + boxH} x2={x + boxW / 2} y2={busY} stroke="#94a3b8" strokeWidth={0.7} />
@@ -63,7 +66,14 @@ function ShardDiagram({ tp }: { tp: number }) {
 }
 
 export const TensorParallelPanel: React.FC<{ shape: IModelShape }> = ({ shape }) => {
-    let [tp, setTp] = useState(1);
+    let progState = useProgramState();
+    let [tp, setTpState] = useState(1);
+
+    function setTp(n: number) {
+        setTpState(n);
+        progState.display.tp = n;   // drives the 3D weight sharding (applyTensorParallelShards)
+        progState.markDirty();
+    }
 
     let params = estimateParams(shape);
     let nKVHeads = shape.nKVHeads ?? shape.nHeads;
@@ -115,5 +125,8 @@ export const TensorParallelPanel: React.FC<{ shape: IModelShape }> = ({ shape })
                 ? 'TP=1: the whole model lives on one GPU. Decode speed is capped by that GPU’s memory bandwidth.'
                 : `TP=${tp}: each GPU holds 1/${tp} of the weights and KV cache, and all ${tp} read their shard in parallel → up to ~${tp}× faster (memory-bound) decode. Cost: ${tp > nKVHeads ? 'KV heads must replicate (GQA has only ' + nKVHeads + '), and ' : ''}2 all-reduces per layer, whose overhead grows with TP and dominates at very small batch.`}
         </p>
+        {tp > 1 && <p className="mt-1 text-[10px] italic leading-snug text-slate-400">
+            The weight matrices in the 3D model on the right are now sliced into {tp} colour-coded bands — one per GPU.
+        </p>}
     </div>;
 };

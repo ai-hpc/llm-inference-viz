@@ -85,6 +85,13 @@ reads its shard in parallel, so memory-bound decode goes up to ~N× faster — m
 all-reduce overhead that grows with TP. Param counts are estimated from the config
 (≈7.6B / 70.5B / 72.6B for the three models) and match the real models.
 
+Selecting TP > 1 **re-shards the 3D model**: each weight matrix (QKV, attention output,
+SwiGLU gate/up & down, LM head) is sliced into N colour-coded bands — one per GPU, matching
+the colours of the GPU boxes in the panel. This is driven by `state.display.tp` →
+`applyTensorParallelShards` in `Program.ts`, which uses `splitIntoShards` (Annotations.ts)
+to break each weight block into N sub-blocks and a per-cube `shardColor` override in
+`blockRender.ts`. Shared palette in `components/shardColors.ts`.
+
 > Note on framing: each model has a hand-set camera. They were tuned without a GPU to
 > view them, so the 7B framing in particular may need a scroll/drag to sit perfectly —
 > easy to adjust in the `modelSet` cameras in `Program.ts`.

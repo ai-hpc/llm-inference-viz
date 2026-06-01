@@ -1,7 +1,7 @@
 import { IBlockLayerLink, IGptModelLink, ILayerNormLayerLink, IModelShape } from "./GptModel";
 import { isNil } from "@/src/utils/data";
 import { Mat4f } from "@/src/utils/matrix";
-import { Dim, Vec3 } from "@/src/utils/vector";
+import { Dim, Vec3, Vec4 } from "@/src/utils/vector";
 import { IBufferTex } from "@/src/utils/renderPhases";
 import { dimProps } from "./Annotations";
 import { DimStyle } from "./walkthrough/WalkthroughTools";
@@ -35,6 +35,7 @@ export interface IBlkDef {
     rangeOffsetsZ?: [number, number][];
     highlight: number; // 0 - 1 (0 = no highlight, 1 = full highlight)
     opacity: number; // 0 - 1 (0 = transparent, 1 = opaque)
+    shardColor?: Vec4; // tensor-parallel shard tint (overrides the t-based weight/act color)
     special: BlkSpecial;
     transpose?: boolean; // transpose the process direction
     subs?: IBlkDef[]; // substitutes for this block (i.e. render these instead)

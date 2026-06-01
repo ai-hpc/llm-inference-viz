@@ -295,6 +295,40 @@ export function splitGridAll(layout: IModelLayout, blk: IBlkDef, dim: Dim) {
     return blocks;
 }
 
+// Split a block into `n` roughly-equal contiguous shards along `dim` (for the
+// tensor-parallel visualization). Returns the sub-blocks so the caller can tint each one.
+export function splitIntoShards(layout: IModelLayout, blk: IBlkDef, dim: Dim, n: number): IBlkDef[] {
+    let { sizeX } = dimProps(blk, dim);
+    let count = Math.min(n, Math.max(1, Math.floor(sizeX)));
+    if (count <= 1) {
+        return [];
+    }
+
+    let blocks: IBlkDef[] = [];
+    let rangeOffsets: [number, number][] = [];
+    for (let i = 0; i < count; i += 1) {
+        let iStart = Math.floor(i * sizeX / count);
+        let iEnd = Math.floor((i + 1) * sizeX / count);
+        if (iEnd <= iStart) {
+            iEnd = iStart + 1;
+        }
+        let res = addSubBlock(layout, blk, dim, iStart, iEnd, 0);
+        if (res) {
+            blocks.push(res.subBlock);
+            rangeOffsets.push(res.rangeOffset);
+        }
+    }
+    if (blocks.length === 0) {
+        return [];
+    }
+
+    if (dim === Dim.X) blk.rangeOffsetsX = rangeOffsets;
+    if (dim === Dim.Y) blk.rangeOffsetsY = rangeOffsets;
+    if (dim === Dim.Z) blk.rangeOffsetsZ = rangeOffsets;
+    blk.subs = blocks;
+    return blocks;
+}
+
 export interface IColorMix {
     color1?: Vec4;
     color2: Vec4;

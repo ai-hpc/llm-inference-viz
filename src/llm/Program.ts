@@ -9,7 +9,7 @@ import { initRender, IRenderState, IRenderView, renderModel, resetRenderBuffers 
 import { beginQueryAndGetPrevMs, endQuery } from "./render/queryManager";
 import { SavedState } from "./SavedState";
 import { isNotNil } from "@/src/utils/data";
-import { Vec3, Vec4 } from "@/src/utils/vector";
+import { Dim, Vec3, Vec4 } from "@/src/utils/vector";
 import { initWalkthrough, runWalkthrough } from "./walkthrough/Walkthrough";
 import { IColorMix } from "./Annotations";
 import { Mat4f } from "@/src/utils/matrix";
@@ -17,6 +17,8 @@ import { runMouseHitTesting } from "./Interaction";
 import { RenderPhase } from "./render/sharedRender";
 import { drawBlockInfo } from "./components/BlockInfo";
 import { TRANSFORMER_STAGES } from "./components/TransformerStages";
+import { SHARD_HEX } from "./components/shardColors";
+import { splitIntoShards } from "./Annotations";
 import { NativeFunctions } from "./NativeBindings";
 import { IWasmGptModel, stepWasmModel, syncWasmDataWithJsAndGpu } from "./GptModelWasm";
 import { IMovementInfo, manageMovement } from "./components/MovementControls";
@@ -82,6 +84,7 @@ export interface IDisplayState {
     blkIdxHover: number[] | null;
     dimHover: DimStyle | null;
     hoveredStage: string | null; // key of the forward-pass stage hovered in the left explainer panel
+    tp: number; // tensor-parallel degree selected in the panel (1 = no sharding)
 }
 
 export interface IHoverTarget {
@@ -193,6 +196,7 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
             dimHover: null,
             blkIdxHover: null,
             hoveredStage: null,
+            tp: 1,
         },
         pageLayout: {
             height: 0,
@@ -222,6 +226,37 @@ function applyStageHighlight(state: IProgramState) {
         let name = cube.name.toLowerCase();
         if (matchers.some(m => name.includes(m))) {
             cube.highlight = Math.max(cube.highlight, 0.8);
+        }
+    }
+}
+
+// Shard-color palette (Vec4) derived from the shared hex list used by the 2D panel.
+const SHARD_VEC4 = SHARD_HEX.map(h => Vec4.fromHexColor(h, 1.0));
+
+// The weight matrices that tensor parallelism splits across GPUs.
+const TP_SHARDED_WEIGHTS = [
+    'Gate + Up Weights', 'Down Weights', 'Projection Weights',
+    'Q Weights', 'K Weights', 'V Weights', 'QKV Weights', 'LM Head Weights',
+];
+
+// When TP > 1, slice each sharded weight block into N coloured bands (one per GPU) so the
+// 3D model shows how tensor parallelism partitions the weights. Runs each frame on the
+// freshly-built layout, so it composes with stage highlighting.
+function applyTensorParallelShards(state: IProgramState) {
+    let tp = state.display.tp;
+    if (!tp || tp <= 1) {
+        return;
+    }
+    for (let cube of state.layout.cubes) {
+        if (cube.opacity <= 0 || cube.t !== 'w' || !cube.name) {
+            continue;
+        }
+        if (!TP_SHARDED_WEIGHTS.some(n => cube.name.startsWith(n))) {
+            continue;
+        }
+        let shards = splitIntoShards(state.layout, cube, Dim.X, tp);
+        for (let i = 0; i < shards.length; i++) {
+            shards[i].shardColor = SHARD_VEC4[i % SHARD_VEC4.length];
         }
     }
 }
@@ -278,6 +313,7 @@ export function runProgram(view: IRenderView, state: IProgramState) {
     updateCamera(state, view);
 
     applyStageHighlight(state);
+    applyTensorParallelShards(state);
 
     drawBlockInfo(state);
     // these will get modified by the walkthrough (stored where?)
