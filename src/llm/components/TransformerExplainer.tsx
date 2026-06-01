@@ -148,5 +148,18 @@ export const TransformerExplainer: React.FC = () => {
             Decode generates one token per forward pass: sample from stage 9, append it, and run the
             whole stack again. The KV cache (stage 5) is what makes that incremental instead of O(n²) each step.
         </p>
+
+        <div className="mt-4 border-t border-slate-200 pt-2 text-[10px] text-slate-400">
+            Companion to{' '}
+            <a
+                href="https://github.com/ai-hpc/ai-hardware-engineer-roadmap/tree/main/Phase%205%20-%20Advanced%20Topics%20and%20Specialization/7.%20ML%20Systems%20Engineering/AI%20Inference%20Engineer%202026"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-blue-600 hover:underline"
+            >
+                AI Inference Engineer 2026
+            </a>
+            . Numbers calibrated to NVIDIA H200 (3.35 TB/s HBM3e, ~295 FLOP/B ridge).
+        </div>
     </div>;
 };

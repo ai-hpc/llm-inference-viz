@@ -1,6 +1,25 @@
 {
-    "name": "llm-viz",
+    "name": "llm-inference-viz",
+    "version": "1.0.0",
     "private": true,
+    "description": "Interactive 3D visualization of dense decoder-only LLM inference (Qwen 2.5 7B/72B, Llama 3.3 70B) — roofline, memory vs compute, and tensor parallelism.",
+    "license": "SEE LICENSE IN NOTICE.md",
+    "homepage": "https://github.com/ai-hpc/llm-inference-viz",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/ai-hpc/llm-inference-viz.git"
+    },
+    "keywords": [
+        "llm",
+        "inference",
+        "visualization",
+        "transformer",
+        "roofline",
+        "tensor-parallelism",
+        "qwen",
+        "llama",
+        "webgl"
+    ],
     "scripts": {
         "dev": "next dev -p 3002",
         "build": "next build",

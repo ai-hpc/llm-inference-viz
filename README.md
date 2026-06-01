@@ -1,150 +1,114 @@
-# Qwen LLM Visualization (fork)
+<div align="center">
 
-A fork of Brendan Bycroft's [llm-viz](https://github.com/bbycroft/llm-viz) — the 3D
-interactive "LLM Visualization" — customized to render **Qwen 2.5–class** models
-(GQA + RoPE + RMSNorm + SwiGLU) instead of only the GPT-2 architecture.
+# 🧠 LLM Inference Visualizer
 
-Built for the **AI Inference Engineer 2026** course (Phase 5 → ML Systems Engineering,
-Stage 2 — Transformer Execution Internals / Part 2 — Dense at Hopper).
+### An interactive 3D model of how a modern dense LLM *actually runs* inference
+
+**[Qwen 2.5 7B](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct) · [Qwen 2.5 72B](https://huggingface.co/Qwen/Qwen2.5-72B-Instruct) · [Llama 3.3 70B](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct)**
+
+Forward pass · roofline (memory- vs compute-bound) · tensor parallelism
+
+![Next.js](https://img.shields.io/badge/Next.js-13-black?logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
+![WebGL2](https://img.shields.io/badge/WebGL2-3D-red)
+![Fork](https://img.shields.io/badge/fork%20of-bbycroft%2Fllm--viz-orange?logo=github)
+
+*Companion to the [**AI Inference Engineer 2026**](https://github.com/ai-hpc/ai-hardware-engineer-roadmap/tree/main/Phase%205%20-%20Advanced%20Topics%20and%20Specialization/7.%20ML%20Systems%20Engineering/AI%20Inference%20Engineer%202026) course.*
+
+</div>
 
 ---
 
-## What this fork adds
+## What is this?
 
-Upstream renders the GPT-2 block exactly: learned position embeddings, LayerNorm,
-full multi-head attention, single GELU MLP. Qwen uses none of those. This fork adds the
-modern-architecture operators, gated behind `shape.arch === 'qwen'` so **every existing
-GPT-2 / GPT-3 view is byte-for-byte unchanged**:
+A 3D, walk-through visualization of a **dense decoder-only transformer** running inference — the architecture behind Qwen 2.5 and Llama 3.3. The right side renders the model's geometry to scale; the left side explains the forward pass and the **performance physics** that decide how fast (and how expensive) inference is.
 
-| Qwen op | Change | Where |
-|---------|--------|-------|
-| **GQA** (64 Q / 8 KV) | `nKVHeads` on the shape; shared query heads no longer draw their own K/V weight/vector/bias columns | `GptModelLayout.ts` (head loop) |
-| **SwiGLU** FFN | FFN width driven by `ffnDim` (not hard-coded `4·C`); blocks relabelled Gate+Up / SiLU⊙ / Down; bias-free | `GptModelLayout.ts` (MLP) |
-| **RMSNorm** | β (bias) term hidden, μ aggregate relabelled, "Layer Norm" → "RMS Norm" | `GptModelLayout.ts` (`createLn`) |
-| **RoPE** | learned position-embedding matrix hidden and annotated | `GptModelLayout.ts` (posEmbed) |
-| Model presets | `Qwen 2.5 72B` (true scale) + `Qwen (nano)` (down-scaled twin) | `Program.ts`, `ModelSelectorToolbar.tsx` |
-| Model card | architecture caption: `GQA 64Q/8KV · SwiGLU · RMSNorm · RoPE` | `components/ModelCard.ts` |
+It answers the questions an inference engineer actually asks:
 
-The fork is also **trimmed to the LLM viz only** — upstream bundled a RISC-V CPU
-simulator and a fluid sim (and a homepage) that broke the production build via a
-build-time `fetch`. Those routes were removed and `/` now redirects to `/llm`.
+- **Where does the time go?** Every stage is labelled **memory-bound** or **compute-bound** on an NVIDIA H200 roofline (~295 FLOP/byte ridge).
+- **Why is decode slow?** Generating one token streams *all ~144 GB of weights* from HBM — see it land on the far-left, memory-bound side of the roofline.
+- **What does tensor parallelism buy?** Slice the model across **TP = 1 / 2 / 4 / 8** GPUs and watch the weights split into colour-coded shards, with per-GPU memory, KV-head replication, and all-reduce cost computed live.
 
-See [`CUSTOMIZATIONS.md`](CUSTOMIZATIONS.md) for the full change rationale and the
-remaining work.
+## ✨ Features
 
-## Three switchable models
+| | |
+|---|---|
+| 🧬 **Three real models** | Switch between Qwen 2.5 7B, Qwen 2.5 72B, and Llama 3.3 70B — true-scale structure (layers, GQA heads, SwiGLU width, vocab). |
+| 🔍 **Synced explainer** | Hover a stage on the left → the matching blocks glow in the 3D model on the right. |
+| 📈 **Roofline chart** | H200-calibrated. Toggle **Prefill / Decode** and watch every stage move between memory- and compute-bound. |
+| 🔀 **Tensor parallelism** | TP=1/2/4/8 re-shards the 3D weights into per-GPU colour bands; panel shows params/GPU, KV replication, all-reduce count, and the FP8+TP=8 alignment gotcha. |
+| 🌐 **Disaggregated P/D** | Real benchmark callout: 4-prefill + 4-decode = 648 tok/s vs aggregated TP=8 = 321 tok/s. |
+| 🧩 **Modern ops** | GQA, RoPE (θ=1e6), RMSNorm, SwiGLU — the actual Qwen/Llama operator set, not GPT-2. |
 
-Top-left buttons switch between three structural views (default **Qwen 2.5 7B**):
+## 🚀 Getting started
 
-| Model | hidden | layers | heads (Q/KV) | SwiGLU ffn | vocab |
-|-------|--------|--------|--------------|------------|-------|
-| **Qwen 2.5 7B** (default) | 3584 | 28 | 28 / 4 | 18944 | 152064 |
-| **Qwen 2.5 72B** | 8192 | 80 | 64 / 8 | 29568 | 152064 |
-| **Llama 3.3 70B** | 8192 | 80 | 64 / 8 | 28672 | 128256 |
-
-All three share the modern-arch operator set (GQA + RoPE + RMSNorm + SwiGLU), so the same
-`arch: 'qwen'` geometry drives all of them; the model-set lives in `Program.ts`
-(`initProgramState`). Like upstream's GPT-3 view these render *structure at scale*, not
-every weight cell (70B+ cells can't be drawn in a browser), so per-cube text labels are
-suppressed for models with > 12 blocks — the **model card** carries the per-model summary
-(`GQA …Q/…KV · SwiGLU · RMSNorm · RoPE` + param count).
-
-The GPT-2/GPT-3 presets and the nano-gpt guided walkthrough were removed. The **expand**
-button (top-left) resets the camera to the current model's framing; mouse drag / scroll
-and WASD-or-arrow keys navigate.
-
-### Left explainer panel
-
-A 2D **"Dense decoder-only transformer"** panel (left, resizable) walks the forward pass
-in execution order: token embedding → RMSNorm → GQA Q/K/V → RoPE → causal softmax →
-attention output+residual → SwiGLU MLP → ×N layers → final norm/logits/sample. **Hovering
-a stage** expands its detailed explanation *and* glows the matching blocks in the 3D model
-on the right (kept in sync via `state.display.hoveredStage` → `applyStageHighlight` in
-`Program.ts`). Stage content lives in `components/TransformerStages.ts`; the panel is
-`components/TransformerExplainer.tsx`.
-
-### Compute- vs memory-bound (roofline)
-
-The panel has a **Prefill / Decode** toggle and a compact **roofline chart**
-(`components/RooflineChart.tsx`): performance vs arithmetic intensity, with the
-memory-bandwidth diagonal bending into the compute ceiling at the ridge point (left =
-memory-bound, right = compute-bound). Each stage shows a **compute/memory bar** + a
-**bound badge** + an approximate FLOP/byte for the selected regime, and hovering a stage
-drops its marker onto the roofline. The teaching point falls straight out: at **decode**
-almost every stage is memory-bound (stream all weights for one token), while at **prefill**
-the matmuls become compute-bound. Intensity numbers are illustrative, not measured.
-
-### Tensor parallelism (TP = 1 / 2 / 4 / 8)
-
-A **TP selector** (`components/TensorParallelPanel.tsx`) shows how the current model shards
-across GPUs: a sharding diagram (N GPU boxes + the all-reduce bus, 2 per layer), and
-per-GPU stats computed from the model shape — total params, params/GPU, weights/GPU (GB,
-FP16), Q heads/GPU, KV heads/GPU (flagging GQA replication when TP > KV heads), and MLP
-width/GPU. The takeaway ties back to the roofline: each GPU holds 1/N of the weights and
-reads its shard in parallel, so memory-bound decode goes up to ~N× faster — minus the
-all-reduce overhead that grows with TP. Param counts are estimated from the config
-(≈7.6B / 70.5B / 72.6B for the three models) and match the real models.
-
-Selecting TP > 1 **re-shards the 3D model**: each weight matrix (QKV, attention output,
-SwiGLU gate/up & down, LM head) is sliced into N colour-coded bands — one per GPU, matching
-the colours of the GPU boxes in the panel. This is driven by `state.display.tp` →
-`applyTensorParallelShards` in `Program.ts`, which uses `splitIntoShards` (Annotations.ts)
-to break each weight block into N sub-blocks and a per-cube `shardColor` override in
-`blockRender.ts`. Shared palette in `components/shardColors.ts`.
-
-The per-stage **roofline readouts also react to TP**. TP divides both FLOPs and weight
-bytes per GPU, so per-GPU arithmetic intensity is ~unchanged for most stages — the honest
-exception is the two **row-parallel all-reduce stages** (attention output, MLP down): their
-per-GPU compute shrinks but the collective doesn’t, so their effective AI falls and they
-turn **comm-bound** (purple badge) as TP grows. Modeled by `effectivePoint` /
-`effectiveBound` in `TransformerStages.ts`.
-
-> Note on framing: each model has a hand-set camera. They were tuned without a GPU to
-> view them, so the 7B framing in particular may need a scroll/drag to sit perfectly —
-> easy to adjust in the `modelSet` cameras in `Program.ts`.
-
-## Run locally
+**Requirements:** Node.js ≥ 18 and a WebGL2-capable browser (recent Chrome / Firefox / Edge).
 
 ```bash
+# 1. Clone
+git clone https://github.com/ai-hpc/llm-inference-viz.git
+cd llm-inference-viz
+
+# 2. Install
 npm install
-npm run dev      # http://localhost:3002/llm
+
+# 3. Run the dev server
+npm run dev
 ```
 
-Production build / serve:
+Then open **http://localhost:3002/llm**.
+
+### Production build
 
 ```bash
 npm run build
-npm start -- -p 3007   # http://localhost:3007/llm
+npm start -- -p 3002        # serves on http://localhost:3002/llm
 ```
 
-## Embedding in the course (mkdocs)
+### How to use it
 
-The viz is a client-rendered Next.js app. To embed in the AI Inference Engineer 2026
-Stage 2 page, host this app (any static/Node host) and iframe it:
+1. Pick a model with the **top-left buttons** (default: Qwen 2.5 7B).
+2. **Drag** to orbit, **scroll** to zoom, **WASD / arrows** to pan; the **⤢ expand** button re-frames.
+3. In the left panel, **hover any stage** to highlight it in 3D and read the detail.
+4. Flip the **Prefill / Decode** toggle and the **TP = 1/2/4/8** selector to see the roofline and sharding change.
 
-```html
-<iframe src="https://<your-host>/llm" width="100%" height="720"
-        style="border:0" loading="lazy" title="Qwen 2.5 inference visualization"></iframe>
+## 🎓 Part of a course
+
+This visualizer is a teaching companion to **[AI Inference Engineer 2026](https://github.com/ai-hpc/ai-hardware-engineer-roadmap/tree/main/Phase%205%20-%20Advanced%20Topics%20and%20Specialization/7.%20ML%20Systems%20Engineering/AI%20Inference%20Engineer%202026)** — part of the open [AI Hardware Engineer Roadmap](https://ai-hpc.github.io/ai-hardware-engineer-roadmap/). It maps most directly to:
+
+- **Part 1 · Lecture 03** — Roofline, bandwidth, and the memory hierarchy
+- **Part 2 · Lecture 01** — Anatomy of a 70B-class dense model (Llama 3.3 70B vs Qwen 2.5 72B)
+- **Part 2 · Lecture 04** — Single-node multi-GPU serving: tensor parallelism on 8× H100/H200
+
+## 🛠️ Tech & structure
+
+Next.js 13 + React + TypeScript, with a hand-written WebGL2 renderer.
+
+```
+src/llm/
+├─ Program.ts                  # state, model presets, render loop, stage-highlight & TP sharding
+├─ GptModelLayout.ts           # 3D geometry of the transformer (GQA / SwiGLU / RMSNorm / RoPE)
+├─ render/blockRender.ts       # WebGL2 block renderer
+└─ components/
+   ├─ TransformerExplainer.tsx  # left panel (forward pass + roofline + TP)
+   ├─ TransformerStages.ts      # per-stage data, H200-calibrated arithmetic intensity
+   ├─ RooflineChart.tsx         # SVG roofline
+   ├─ TensorParallelPanel.tsx   # TP=1/2/4/8 explorer
+   └─ shardColors.ts            # shared per-GPU palette
 ```
 
-## ⚠️ Status & honest limits
+Numbers (arithmetic intensity, weight sizes, throughput) are calibrated to **NVIDIA H200 SXM** (989 TFLOPS BF16, 3.35 TB/s HBM3e) and to published vLLM / SGLang / AIConfigurator benchmarks. They are illustrative teaching figures, not a profiler.
 
-- **Builds, typechecks, and serves** (`npm run build` is green; `/llm` returns 200).
-- **3D output is not visually verified here.** It was developed in a headless
-  environment with no GPU/browser, so the geometry changes are verified by types and
-  build only — **open it in a browser to confirm the 3D layout reads correctly** and to
-  tune block spacing / camera for the Qwen presets.
-- **Structural, not numeric, for Qwen.** Upstream runs a real WebGL forward pass only
-  for the tiny nano-gpt weights. The Qwen presets reuse the structural renderer; a
-  numerically-running Qwen micro-model (GQA / RoPE / SwiGLU / RMSNorm in GLSL) is the
-  documented follow-on in `CUSTOMIZATIONS.md`.
-- **Walkthrough narration** (the GPT-2 guided tour) was **removed** in this build, not
-  ported. If you later want a Qwen guided tour, the narration would need rewriting for
-  RMSNorm / GQA+RoPE / SwiGLU (see `CUSTOMIZATIONS.md`).
+## 🙏 Attribution & license
 
-## Attribution & license
+Forked from and built on **[Brendan Bycroft's `llm-viz`](https://github.com/bbycroft/llm-viz)** — the original 3D LLM visualization — re-targeted from GPT-2 to the modern Qwen / Llama dense-decoder architecture, with the roofline and tensor-parallelism layers added. **Huge thanks to Brendan** for the renderer and the original idea.
 
-Forked from **Brendan Bycroft's llm-viz** (https://github.com/bbycroft/llm-viz).
-The upstream repository did **not** include an explicit license file at the commit this
-was forked from. **Confirm licensing / permission with the upstream author before
-publishing or distributing this fork** (including embedding on a public course site).
+> ⚠️ **Licensing note.** The upstream `llm-viz` repository does **not** publish an explicit
+> open-source license, so its code is — by default — *all rights reserved by the original
+> author*. This fork exists **for educational purposes** as a companion to the course, with
+> full attribution. The **new code added in this fork** (the Qwen/Llama retargeting, the
+> roofline charts, and the tensor-parallelism layers — see [`NOTICE.md`](NOTICE.md)) is
+> offered freely for educational use, but it does **not** and **cannot** relicense the
+> upstream work. **If you intend to redistribute, host publicly long-term, or use this
+> commercially, please obtain permission from the upstream author first.** See
+> [`NOTICE.md`](NOTICE.md) for details.
