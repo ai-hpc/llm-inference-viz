@@ -8,6 +8,14 @@ import { drawRoundedRect } from "./DataFlow";
 
 export function drawBlockInfo(state: IProgramState) {
 
+    // Per-cube text labels are only legible for small models. A large structural model
+    // (e.g. Qwen 2.5 72B: 80 blocks → tens of thousands of cubes) would write a sea of
+    // overlapping labels — unreadable, slow, and well past the font buffer. Skip them;
+    // the model card carries the summary instead.
+    if (state.layout.shape.nBlocks > 12) {
+        return;
+    }
+
     for (let blk of state.layout.cubes) {
 
         let blkTopMid = new Vec3(blk.x + blk.dx / 2, blk.y, blk.z + blk.dz / 2);

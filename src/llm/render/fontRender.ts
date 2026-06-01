@@ -384,6 +384,7 @@ export function writeTextToBuffer(fontBuf: IFontBuffers, text: string, color: Ve
         let newBuf = new Float32Array(newCapacity * floatsPerSegment);
         newBuf.set(fontBuf.localTexBuffer);
         fontBuf.localTexBuffer = newBuf;
+        fontBuf.segmentCapacity = newCapacity; // bug fix: was never updated, so set() overflowed past 2x
     }
 
     fontBuf.localTexBuffer.set(mtx, fontBuf.segmentsUsed * floatsPerSegment + 0);
