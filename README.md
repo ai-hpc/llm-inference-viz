@@ -63,6 +63,17 @@ on the right (kept in sync via `state.display.hoveredStage` → `applyStageHighl
 `Program.ts`). Stage content lives in `components/TransformerStages.ts`; the panel is
 `components/TransformerExplainer.tsx`.
 
+### Compute- vs memory-bound (roofline)
+
+The panel has a **Prefill / Decode** toggle and a compact **roofline chart**
+(`components/RooflineChart.tsx`): performance vs arithmetic intensity, with the
+memory-bandwidth diagonal bending into the compute ceiling at the ridge point (left =
+memory-bound, right = compute-bound). Each stage shows a **compute/memory bar** + a
+**bound badge** + an approximate FLOP/byte for the selected regime, and hovering a stage
+drops its marker onto the roofline. The teaching point falls straight out: at **decode**
+almost every stage is memory-bound (stream all weights for one token), while at **prefill**
+the matmuls become compute-bound. Intensity numbers are illustrative, not measured.
+
 > Note on framing: each model has a hand-set camera. They were tuned without a GPU to
 > view them, so the 7B framing in particular may need a scroll/drag to sit perfectly —
 > easy to adjust in the `modelSet` cameras in `Program.ts`.

@@ -1,13 +1,34 @@
 // The forward pass of a dense, decoder-only transformer (the Qwen 2.5 / Llama 3.3 family),
 // in execution order. Each stage maps to one or more named blocks in the 3D layout
 // (`match`) so the left explainer panel can light up the matching geometry on hover.
+//
+// Each stage also carries a roofline character per regime: `compute` is a 0..1 "compute
+// intensity" (0 = pure memory-bound, 1 = pure compute-bound) used to draw the per-stage
+// bar, and `ai` is an order-of-magnitude arithmetic intensity (FLOP/byte) used to place
+// the stage on the roofline chart. Numbers are illustrative, not measured.
+
+export type Regime = 'prefill' | 'decode';
+
+export interface IRooflinePoint {
+    compute: number; // 0 (memory-bound) .. 1 (compute-bound)
+    ai: number;      // arithmetic intensity, FLOP/byte (log-scale marker)
+}
 
 export interface ITransformerStage {
     key: string;
     title: string;
-    summary: string;   // always shown
-    detail: string;    // shown on hover
-    match: string[];   // cube-name substrings (case-insensitive) to highlight on the right
+    summary: string;
+    detail: string;
+    match: string[];                 // cube-name substrings (case-insensitive) to highlight
+    prefill: IRooflinePoint;
+    decode: IRooflinePoint;
+    why: string;                     // one line: why this is compute- or memory-bound
+}
+
+export function boundLabel(c: number): 'Compute-bound' | 'Memory-bound' | 'Mixed' {
+    if (c >= 0.66) return 'Compute-bound';
+    if (c <= 0.34) return 'Memory-bound';
+    return 'Mixed';
 }
 
 export const TRANSFORMER_STAGES: ITransformerStage[] = [
@@ -19,6 +40,9 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
             'vector of width d_model (the residual stream). There is NO learned positional ' +
             'embedding — modern dense decoders inject position later via RoPE, inside attention.',
         match: ['Token Embed', 'Input Embed', 'Tokens'],
+        prefill: { compute: 0.08, ai: 0.3 },
+        decode: { compute: 0.05, ai: 0.25 },
+        why: 'A memory gather — one row read per token, almost no arithmetic.',
     },
     {
         key: 'rmsnorm',
@@ -28,6 +52,9 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
             'no bias term) and rescales by a learned γ. It is cheaper and more stable than ' +
             'LayerNorm and is applied pre-attention and pre-MLP (pre-norm residual design).',
         match: ['RMS Norm', 'γ'],
+        prefill: { compute: 0.12, ai: 0.5 },
+        decode: { compute: 0.06, ai: 0.3 },
+        why: 'Elementwise over the activation — bandwidth-bound in both regimes.',
     },
     {
         key: 'qkv',
@@ -38,6 +65,10 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
             'so several query heads share one KV head. That shrinks the KV cache ~8× — the ' +
             'main memory bottleneck during decode.',
         match: ['Q Weights', 'K Weights', 'V Weights', 'Q vectors', 'K vectors', 'V vectors', 'QKV'],
+        prefill: { compute: 0.9, ai: 120 },
+        decode: { compute: 0.15, ai: 2 },
+        why: 'Prefill: a GEMM that reuses each weight across all tokens (compute-bound). ' +
+            'Decode: a GEMV — stream the whole weight matrix to multiply by one vector (memory-bound).',
     },
     {
         key: 'rope',
@@ -48,6 +79,9 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
             'difference, the model sees RELATIVE positions. No learned table, and it ' +
             'extrapolates to long context — applied inside attention, not at the embedding.',
         match: ['Q vectors', 'K vectors'],
+        prefill: { compute: 0.1, ai: 0.4 },
+        decode: { compute: 0.05, ai: 0.3 },
+        why: 'A cheap elementwise rotation — memory-bound, negligible FLOPs.',
     },
     {
         key: 'attn',
@@ -58,6 +92,10 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
             'defining property of DECODE. Softmax turns scores into weights. At each decode ' +
             'step this reads the whole KV cache, which is why decode is bandwidth-bound.',
         match: ['Attention Matrix', 'Attn Matrix Softmax'],
+        prefill: { compute: 0.8, ai: 60 },
+        decode: { compute: 0.1, ai: 1.2 },
+        why: 'Prefill: O(N²) QKᵀ GEMM is compute-heavy. Decode: read the entire KV cache ' +
+            'for a few FLOPs per element — pure bandwidth, and it grows with context length.',
     },
     {
         key: 'attnout',
@@ -67,6 +105,9 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
             'heads are concatenated and mixed by the output projection. The result is ADDED ' +
             'to the residual stream (the skip connection) rather than replacing it.',
         match: ['V Output', 'Attention Output', 'Projection Weights', 'Projection Bias', 'Attention Residual'],
+        prefill: { compute: 0.9, ai: 120 },
+        decode: { compute: 0.15, ai: 2 },
+        why: 'Another projection GEMM/GEMV — compute-bound batched (prefill), memory-bound at batch=1 (decode).',
     },
     {
         key: 'mlp',
@@ -75,8 +116,12 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
         detail: 'After a second RMSNorm, the feed-forward block uses SwiGLU: two parallel ' +
             'projections up to the inner dim (gate and up), combined as SiLU(gate) ⊙ up, then ' +
             'a down projection back to d_model. It is bias-free and ~3.5× wider than d_model. ' +
-            'The output is added to the residual stream.',
+            'It holds the majority of the model’s weights.',
         match: ['Gate + Up', 'SiLU', 'Down Weights', 'MLP'],
+        prefill: { compute: 0.95, ai: 200 },
+        decode: { compute: 0.12, ai: 2 },
+        why: 'The biggest matmuls and most of the weights. Prefill: the dominant FLOPs ' +
+            '(compute-bound). Decode: the dominant weight bytes streamed from HBM (memory-bound).',
     },
     {
         key: 'layers',
@@ -86,6 +131,10 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
             'Qwen 2.5 7B, 80 for the 70B-class models), each with its own weights, the ' +
             'residual stream threading straight through all of them.',
         match: ['Residual'],
+        prefill: { compute: 0.85, ai: 150 },
+        decode: { compute: 0.1, ai: 2 },
+        why: 'Per token, decode must read EVERY layer’s weights once — total weight bytes ' +
+            'set the decode speed (memory bandwidth bound).',
     },
     {
         key: 'lmhead',
@@ -96,5 +145,8 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
             'samples ONE token from it, appends it to the sequence, and the whole pass runs ' +
             'again for the next token — one token per forward pass.',
         match: ['LM Head', 'Logits'],
+        prefill: { compute: 0.85, ai: 100 },
+        decode: { compute: 0.1, ai: 1.5 },
+        why: 'A large (vocab × d_model) matrix. At decode it is one more big weight read — memory-bound.',
     },
 ];
