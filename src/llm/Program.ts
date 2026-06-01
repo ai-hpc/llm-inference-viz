@@ -15,7 +15,7 @@ import { IColorMix } from "./Annotations";
 import { Mat4f } from "@/src/utils/matrix";
 import { runMouseHitTesting } from "./Interaction";
 import { RenderPhase } from "./render/sharedRender";
-import { drawBlockInfo } from "./components/BlockInfo";
+import { drawBlockInfo, drawContextWindowLabel } from "./components/BlockInfo";
 import { TRANSFORMER_STAGES } from "./components/TransformerStages";
 import { SHARD_HEX } from "./components/shardColors";
 import { splitIntoShards } from "./Annotations";
@@ -318,6 +318,7 @@ export function runProgram(view: IRenderView, state: IProgramState) {
     applyTensorParallelShards(state);
 
     drawBlockInfo(state);
+    drawContextWindowLabel(state);
     // these will get modified by the walkthrough (stored where?)
     drawAllArrows(state.render, state.layout);
 
