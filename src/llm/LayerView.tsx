@@ -19,6 +19,8 @@ import { jumpPhase } from './Commentary';
 import { WelcomePopup } from './WelcomePopup';
 import { KeyboardManagerContext, KeyboardOrder, useGlobalKeyboard } from '@/src/utils/keyboard';
 import { ModelSelectorToolbar } from './components/ModelSelectorToolbar';
+import { Resizer } from '../utils/Resizer';
+import { TransformerExplainer } from './components/TransformerExplainer';
 
 async function fetchTensorData(url: string): Promise<ITensorSet> {
     let resp = await fetch(url);
@@ -185,6 +187,12 @@ export function LayerView() {
         }
     }, [canvasRender, layout]);
 
+    let sidebar = canvasRender && <div className={s.sidebar}>
+        <ProgramStateContext.Provider value={canvasRender.progState}>
+            <TransformerExplainer />
+        </ProgramStateContext.Provider>
+    </div>;
+
     let mainView = <div className={s.canvasWrap}>
         <canvas
             className={s.canvas}
@@ -210,7 +218,11 @@ export function LayerView() {
     </div>;
 
     return <div className={s.view}>
-        {mainView}
+        <Resizer id={"llm-explainer"} className={"flex-1"} vertical={!layout.isDesktop} defaultFraction={0.32}>
+            {layout.isDesktop && sidebar}
+            {mainView}
+            {!layout.isDesktop && sidebar}
+        </Resizer>
     </div>;
 }
 

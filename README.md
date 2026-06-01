@@ -49,9 +49,19 @@ every weight cell (70B+ cells can't be drawn in a browser), so per-cube text lab
 suppressed for models with > 12 blocks — the **model card** carries the per-model summary
 (`GQA …Q/…KV · SwiGLU · RMSNorm · RoPE` + param count).
 
-The GPT-2/GPT-3 presets and the nano-gpt guided **walkthrough sidebar** ("chapter
-overview") were removed. The **expand** button (top-left) resets the camera to the current
-model's framing; mouse drag / scroll and WASD-or-arrow keys navigate.
+The GPT-2/GPT-3 presets and the nano-gpt guided walkthrough were removed. The **expand**
+button (top-left) resets the camera to the current model's framing; mouse drag / scroll
+and WASD-or-arrow keys navigate.
+
+### Left explainer panel
+
+A 2D **"Dense decoder-only transformer"** panel (left, resizable) walks the forward pass
+in execution order: token embedding → RMSNorm → GQA Q/K/V → RoPE → causal softmax →
+attention output+residual → SwiGLU MLP → ×N layers → final norm/logits/sample. **Hovering
+a stage** expands its detailed explanation *and* glows the matching blocks in the 3D model
+on the right (kept in sync via `state.display.hoveredStage` → `applyStageHighlight` in
+`Program.ts`). Stage content lives in `components/TransformerStages.ts`; the panel is
+`components/TransformerExplainer.tsx`.
 
 > Note on framing: each model has a hand-set camera. They were tuned without a GPU to
 > view them, so the 7B framing in particular may need a scroll/drag to sit perfectly —

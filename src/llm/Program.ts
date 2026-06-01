@@ -16,6 +16,7 @@ import { Mat4f } from "@/src/utils/matrix";
 import { runMouseHitTesting } from "./Interaction";
 import { RenderPhase } from "./render/sharedRender";
 import { drawBlockInfo } from "./components/BlockInfo";
+import { TRANSFORMER_STAGES } from "./components/TransformerStages";
 import { NativeFunctions } from "./NativeBindings";
 import { IWasmGptModel, stepWasmModel, syncWasmDataWithJsAndGpu } from "./GptModelWasm";
 import { IMovementInfo, manageMovement } from "./components/MovementControls";
@@ -80,6 +81,7 @@ export interface IDisplayState {
     hoverTarget: IHoverTarget | null;
     blkIdxHover: number[] | null;
     dimHover: DimStyle | null;
+    hoveredStage: string | null; // key of the forward-pass stage hovered in the left explainer panel
 }
 
 export interface IHoverTarget {
@@ -190,6 +192,7 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
             hoverTarget: null,
             dimHover: null,
             blkIdxHover: null,
+            hoveredStage: null,
         },
         pageLayout: {
             height: 0,
@@ -198,6 +201,29 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
             isPhone: true,
         }
     };
+}
+
+// When a stage is hovered in the left explainer panel, glow the matching blocks on the
+// right so the 2D explanation stays in sync with the 3D geometry.
+function applyStageHighlight(state: IProgramState) {
+    let key = state.display.hoveredStage;
+    if (!key) {
+        return;
+    }
+    let stage = TRANSFORMER_STAGES.find(s => s.key === key);
+    if (!stage) {
+        return;
+    }
+    let matchers = stage.match.map(m => m.toLowerCase());
+    for (let cube of state.layout.cubes) {
+        if (cube.opacity <= 0 || !cube.name) {
+            continue;
+        }
+        let name = cube.name.toLowerCase();
+        if (matchers.some(m => name.includes(m))) {
+            cube.highlight = Math.max(cube.highlight, 0.8);
+        }
+    }
 }
 
 export function runProgram(view: IRenderView, state: IProgramState) {
@@ -250,6 +276,8 @@ export function runProgram(view: IRenderView, state: IProgramState) {
     }
 
     updateCamera(state, view);
+
+    applyStageHighlight(state);
 
     drawBlockInfo(state);
     // these will get modified by the walkthrough (stored where?)
