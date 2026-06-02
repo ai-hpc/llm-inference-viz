@@ -37,10 +37,17 @@ export const TransformerExplainer: React.FC = () => {
     let [hovered, setHovered] = useState<string | null>(null);
     let [regime, setRegime] = useState<Regime>('decode');
     let [tp, setTpState] = useState(1);
+    let [ctx, setCtxState] = useState(32768);
 
     function setTp(n: number) {
         setTpState(n);
         progState.display.tp = n; // drives the 3D weight sharding (applyTensorParallelShards)
+        progState.markDirty();
+    }
+
+    function setCtx(n: number) {
+        setCtxState(n);
+        progState.display.ctxLen = n; // drives the KV-cache math + the 3D context-window label
         progState.markDirty();
     }
 
@@ -107,7 +114,7 @@ export const TransformerExplainer: React.FC = () => {
 
         {/* tensor parallelism */}
         <SectionLabel>Tensor parallelism</SectionLabel>
-        {currentPreset && <TensorParallelPanel shape={currentPreset.shape} tp={tp} onTpChange={setTp} />}
+        {currentPreset && <TensorParallelPanel shape={currentPreset.shape} tp={tp} onTpChange={setTp} ctx={ctx} onCtxChange={setCtx} />}
         {tp > 1 && <div className="mt-2">
             <Admonition kind="key" title={`TP=${tp} & the roofline`}>
                 Per GPU, TP divides <em>both</em> FLOPs and weight bytes, so most stages keep the same arithmetic

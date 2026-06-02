@@ -85,6 +85,7 @@ export interface IDisplayState {
     dimHover: DimStyle | null;
     hoveredStage: string | null; // key of the forward-pass stage hovered in the left explainer panel
     tp: number; // tensor-parallel degree selected in the panel (1 = no sharding)
+    ctxLen: number; // context length selected in the panel (KV-cache math + 3D window label)
 }
 
 export interface IHoverTarget {
@@ -199,6 +200,7 @@ export function initProgramState(canvasEl: HTMLCanvasElement, fontAtlasData: IFo
             blkIdxHover: null,
             hoveredStage: null,
             tp: 1,
+            ctxLen: 32768,
         },
         pageLayout: {
             height: 0,

@@ -56,7 +56,7 @@ export function drawContextWindowLabel(state: IProgramState) {
         return;
     }
     let T = state.shape.T;
-    let ctx = state.shape.ctxLen ?? T;
+    let ctx = state.display.ctxLen ?? state.shape.ctxLen ?? T;
     if (ctx <= T) {
         return; // window already covers the whole context — nothing to express
     }

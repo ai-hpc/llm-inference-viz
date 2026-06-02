@@ -73,11 +73,15 @@ function decodeThroughputNote(tp: number, perGpuGb: number): string {
     return `~${scaledEst} tok/s per GPU (H200 BW ÷ weight bytes/GPU; benchmark: TP=8 agg. ≈ 321 tok/s/GPU)`;
 }
 
+const CTX_OPTIONS = [4096, 8192, 32768];
+
 export const TensorParallelPanel: React.FC<{
     shape: IModelShape;
     tp: number;
     onTpChange: (n: number) => void;
-}> = ({ shape, tp, onTpChange }) => {
+    ctx: number;
+    onCtxChange: (n: number) => void;
+}> = ({ shape, tp, onTpChange, ctx, onCtxChange }) => {
     let params     = estimateParams(shape);
     let nKVHeads   = shape.nKVHeads ?? shape.nHeads;
     let bytesFp16  = 2 * params;
@@ -88,9 +92,9 @@ export const TensorParallelPanel: React.FC<{
     let ffnPerGpu  = (shape.ffnDim ?? shape.C * 4) / tp;
     let kvReplicated = tp > nKVHeads;
 
-    // KV cache for the configured context (batch 1, FP16):
+    // KV cache for the selected context (batch 1, FP16):
     //   2 (K+V) × layers × kv_heads × head_dim × ctx × 2 bytes
-    let ctxLen = shape.ctxLen ?? shape.T;
+    let ctxLen = ctx;
     let ctxFmt = ctxLen >= 1024 ? `${Math.round(ctxLen / 1024)}K` : `${ctxLen}`;
     let kvTotalBytes = 2 * shape.nBlocks * nKVHeads * shape.A * ctxLen * 2;
     let kvShards = Math.min(tp, nKVHeads); // KV heads shard with TP, replicate beyond nKVHeads
@@ -149,7 +153,19 @@ export const TensorParallelPanel: React.FC<{
 
         {/* Context + KV cache (the context-length cost) */}
         <div className="mt-1 border-t border-slate-100 pt-1">
-            {stat('Context (KV)', ctxFmt + ' tokens')}
+            <div className="flex items-center justify-between gap-2 py-0.5">
+                <span className="text-[11px] text-slate-500">Context (KV)</span>
+                <div className="flex gap-1">
+                    {CTX_OPTIONS.map(n => (
+                        <button
+                            key={n}
+                            onClick={() => onCtxChange(n)}
+                            className={clsx('rounded px-1.5 py-0.5 text-[10px] font-semibold',
+                                ctx === n ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-indigo-100')}
+                        >{n >= 1024 ? `${Math.round(n / 1024)}K` : n}</button>
+                    ))}
+                </div>
+            </div>
             {stat('KV cache @ ' + ctxFmt, gb(kvTotalBytes), 'FP16, batch 1')}
             {stat('KV cache / GPU', gb(kvPerGpuBytes),
                 kvReplicated ? `÷${nKVHeads} (KV-head cap)` : `÷${tp}`)}
