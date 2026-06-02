@@ -52,9 +52,10 @@ export const H200_RIDGE_AI = 295; // FLOP/byte
 // unchanged for column-parallel stages. The exception: the two row-parallel
 // sub-layers (attention output, MLP down) end in an all-reduce whose cost is
 // proportional to (TP-1)/TP and does NOT shrink with TP → they become comm-bound
-// at high TP. Each H200-to-H200 all-reduce (NVLink 4, ~900 GB/s bidirectional)
-// adds ~0.03 ms per layer; at TP=8 and 80 layers this adds ~5 ms per forward
-// pass — comparable to the memory-bound decode time itself.
+// at high TP. Each all-reduce over NVLink costs on the order of tens of µs (highly
+// dependent on GPU count, message size, and NCCL impl); across 160 collectives per
+// forward pass (2 per layer × 80) that can become a meaningful fraction of decode
+// latency at TP=8. Treat any specific µs/ms figure as illustrative, not a constant.
 export function effectivePoint(stage: ITransformerStage, regime: Regime, tp: number): { compute: number; ai: number; comm: boolean } {
     let base = stage[regime];
     if (stage.comm && tp > 1) {
@@ -146,12 +147,12 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
         title: '5 · Scores + causal softmax',
         summary: 'QKᵀ/√d, mask the future, softmax.',
         detail:
-            'At each decode step: score_i = Q · K_i / √128 for every past token i (context N). ' +
-            'Reads the full KV cache: 2 × N × 128 × 8 heads × 2 B (BF16) per layer. ' +
-            'At N=128K (Qwen max context): ~52 GB of KV per layer — impossible to hold without paging. ' +
-            'This is why PagedAttention (vLLM) is essential: it manages KV cache in non-contiguous 4KB pages, ' +
-            'eliminating fragmentation. Prefill: QKᵀ is an O(N²) GEMM within the attention heads, ' +
-            'becoming compute-bound at long sequences. FlashAttention 2 fuses it to avoid materialising the full score matrix.',
+            'At each decode step: score_i = Q · K_i / √128 for every past token i (context N) — O(N) KV reads per token. ' +
+            'KV cache size with GQA: 2 (K+V) × 8 KV heads × 128 head_dim × 2 B (BF16) = ~4 KB per token per layer. ' +
+            'At N=128K that is ~512 MB per layer, so ~40 GB across all 80 layers — large enough that ' +
+            'PagedAttention (vLLM) is essential: it stores the KV cache in fixed-size blocks (pages), ' +
+            'eliminating fragmentation rather than shrinking it. Prefill: QKᵀ is an O(N²) GEMM, ' +
+            'becoming compute-bound at long sequences. FlashAttention avoids materialising the full N×N score matrix.',
         match: ['Attention Matrix', 'Attn Matrix Softmax'],
         prefill: { compute: 0.68, ai: 55 },
         decode: { compute: 0.08, ai: 0.8 },
@@ -174,9 +175,9 @@ export const TRANSFORMER_STAGES: ITransformerStage[] = [
         prefill: { compute: 0.90, ai: 480 },
         decode: { compute: 0.12, ai: 1.0 },
         why:
-            'Decode: GEMV, 134 MB weight stream per token (AI ≈ 1 FLOP/B). ' +
-            'Row-parallel under TP → ends in an NVLink all-reduce. ' +
-            'At TP=8 each all-reduce adds ~0.03 ms; 80 layers → ~2.4 ms cumulative per forward pass.',
+            'Decode: GEMV, ~134 MB weight stream per token (AI ≈ 1 FLOP/B) → memory-bandwidth bound, not compute-bound. ' +
+            'Row-parallel under TP → ends in an NVLink all-reduce; at TP=8 that collective (a few tens of µs, ' +
+            'hardware-dependent) becomes a meaningful fraction of per-layer decode latency.',
         comm: true,
     },
     {
