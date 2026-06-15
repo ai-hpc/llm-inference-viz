@@ -23,7 +23,7 @@ import { Resizer } from '../utils/Resizer';
 import { TransformerExplainer } from './components/TransformerExplainer';
 
 async function fetchTensorData(url: string): Promise<ITensorSet> {
-    let resp = await fetch(url);
+    let resp = await fetch(`${process.env.BASE_URL ?? ''}/${url}`);
     let data = await resp.json();
     for (let k in data) {
         if (data[k].shape) {

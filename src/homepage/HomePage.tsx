@@ -30,7 +30,7 @@ export const HomePage: React.FC = () => {
     return <div className={s.homePage}>
         <div className={s.headerSection}>
             <div className={s.profilePic}>
-                <img src="/me.jpeg" alt="Profile Picture" />
+                <img src={`${process.env.BASE_URL ?? ''}/me.jpeg`} alt="Profile Picture" />
             </div>
             <div className={s.nameSection}>
                 <div className={s.name}>
@@ -70,7 +70,7 @@ export const HomePage: React.FC = () => {
             <div className={s.projectCard} onClick={() => router.push('/llm')}>
                 <div className={s.cardImageWrapper}>
                     <div className={s.cardImage}>
-                        <img src="/images/llm-viz-screenshot2.png" alt="LLM Visualization Screenshot" />
+                        <img src={`${process.env.BASE_URL ?? ''}/images/llm-viz-screenshot2.png`} alt="LLM Visualization Screenshot" />
                     </div>
                 </div>
                 <div className={s.cardContent}>
